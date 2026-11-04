@@ -296,17 +296,17 @@
 
   function readQuery() {
     const subject = subjectInput.value.trim();
-    if (!subject) {
-      showError('Enter a person or business name to check.');
+    const number = numberInput.value.trim();
+    if (!subject && !number) {
+      showError('Enter a person or business name, or a registration number.');
       subjectInput.focus();
       return null;
     }
     const query = {
-      subject,
       licence_type: typeSelect.value,
       jurisdiction: jurisdictionSelect.value
     };
-    const number = numberInput.value.trim();
+    if (subject) query.subject = subject;
     if (number) query.number = number;
     return query;
   }
@@ -317,7 +317,7 @@
     submitButton.disabled = true;
     const controller = new AbortController();
     state.verifyAbort = controller;
-    startLoading(query.subject);
+    startLoading(query.subject || `registration ${query.number}`);
     try {
       const payload = await apiFetch('/api/verify', {
         method: 'POST',
@@ -727,7 +727,7 @@
   function renderResult(payload) {
     clearNode(resultBodyEl);
     const q = state.currentQuery || {};
-    resultTitleEl.textContent = `Result — ${q.subject || ''}`;
+    resultTitleEl.textContent = `Result — ${payload.query?.subject || q.subject || q.number || ''}`;
 
     let renderer;
     switch (payload.match_quality) {
