@@ -154,7 +154,7 @@ curl -s https://tinyverify.vercel.app/api/verify \
 
 ## Verification performed
 
-- `npm test` → **40 tests, 40 pass**, no network. Covers name variants, status vocabulary, day-first
+- `npm test` → **42 tests, 42 pass**, no network. Covers name variants, status vocabulary, day-first
   and month-first date parsing, all four registry parsers against pages captured from the live
   sites, match classification, snapshot diffing, transient-miss handling, routing and error shapes.
 - Each registry was exercised live end to end, including a no-match and a multi-match case.
