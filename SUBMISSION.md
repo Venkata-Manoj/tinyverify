@@ -52,7 +52,7 @@ Air New Zealand Limited · business · NZ
   https://app.companiesoffice.govt.nz/co/104799
 
 Air New Zealand · business · NZ
-→ multiple · 11 candidates, statuses preserved (active and expired), primary: null
+→ multiple · 10 candidates at the time of check, statuses preserved (active and expired), primary: null
 
 DONE RIGHT DISCOUNT FLOORING · contractor · US-CA
 → exact · revoked ("revoked and not able to contract") · 738180 · expiry 2017-05-28

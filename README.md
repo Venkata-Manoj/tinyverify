@@ -155,7 +155,7 @@ A transient registry miss — a timeout, a bot challenge, a page that no longer 
 
 Name variants (comma order, missing legal suffix, middle initials) are tried at most twice. Two registries answering for the same subject are returned as separate records; if their statuses disagree the response is `status: "unknown"` with both records and an explicit conflict note, never a merge.
 
-![TinyVerify returning eleven candidates for "Air New Zealand" with no auto-selection](docs/screenshot-candidates.png)
+![TinyVerify returning multiple candidates for "Air New Zealand" with no auto-selection](docs/screenshot-candidates.png)
 
 ---
 
