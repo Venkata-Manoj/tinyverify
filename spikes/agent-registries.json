@@ -1,0 +1,36 @@
+{
+  "ran_at": "2026-11-04T12:47:09.386Z",
+  "results": [
+    {
+      "id": "ahpra",
+      "ms": 206568,
+      "http": 200,
+      "status": "COMPLETED",
+      "steps": 36,
+      "result": {
+        "found": false,
+        "matches": [],
+        "page_note": "The AHPRA public register search URL (https://www.ahpra.gov.au/Register_Search.aspx) consistently returns a 404 error (URL rejected by administrator). The link 'Search registered health practitioners' on the AHPRA homepage also points to the same non-functional page. The page was blocked by server-side errors before any CAPTCHA appeared, preventing the search for practitioners with surname 'Smith'."
+      },
+      "error": null
+    },
+    {
+      "id": "hcpc",
+      "ms": 169853,
+      "http": 200,
+      "status": "COMPLETED",
+      "steps": 28,
+      "result": {
+        "found": false,
+        "matches": [],
+        "page_note": "The task cannot be completed because the HCPC register website (hcpc-uk.org) is blocked by a Cloudflare security verification challenge (bot detection). The page displays a 'Performing security verification' screen and prevents access to the search results for surname 'Smith' with profession 'Occupational therapist'. This is an objective blocking factor that prevents data extraction."
+      },
+      "error": null
+    },
+    {
+      "id": "gmc",
+      "ms": 306880,
+      "error": "TypeError: fetch failed"
+    }
+  ]
+}

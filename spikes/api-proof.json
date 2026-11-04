@@ -1,0 +1,110 @@
+{
+  "ran_at": "2026-11-04T12:39:40.864Z",
+  "steps": [
+    {
+      "name": "search",
+      "ok": true,
+      "ms": 3163,
+      "value": {
+        "status": 200,
+        "results": [
+          {
+            "position": 1,
+            "site_name": "www.gmc-uk.org",
+            "snippet": "You can search our registers to find a doctor, PA or AA and view their registration status and other useful information. Searching for more than one doctor, PA ...",
+            "title": "Our registers - GMC",
+            "url": "https://www.gmc-uk.org/registration-and-licensing/our-registers"
+          },
+          {
+            "position": 2,
+            "site_name": "www.gmc-uk.org",
+            "snippet": "Search for a doctor, PA or AA. You can search the registration status of all doctors, PAs and AAs in the UK. Search our registers ...",
+            "title": "Registration and licensing - GMC",
+            "url": "https://www.gmc-uk.org/registration-and-licensing"
+          },
+          {
+            "position": 3,
+            "site_name": "www.gmc-uk.org",
+            "snippet": "All doctors working as a GP in UK health services must be on the GP Register. Check eligibility, application types and other steps to work as a GP.",
+            "title": "What is the GP Register? How do you apply? - GMC",
+            "url": "https://www.gmc-uk.org/registration-and-licensing/our-registers/a-guide-to-our-registers/gp-registration"
+          }
+        ]
+      }
+    },
+    {
+      "name": "fetch",
+      "ok": true,
+      "ms": 2349,
+      "value": {
+        "status": 200,
+        "text_head": "* Company Overview for TESCO PLC (00445790)\n* Filing history for TESCO PLC (00445790)\n* People for TESCO PLC (00445790)\n* Charges for TESCO PLC (00445790)\n* More for TESCO PLC (00445790)\n\n* Registered office address\n* Tesco House, Shire Park, Kestrel Way, Welwyn Garden City, United Kingdom, AL7 1GA\n\n* Company status\n* Active\n\n* Company type\n* Public limited Company\n\n* Incorporated on\n* 27 November 1947\n\n## Accounts\n\nNext accounts made up to 26 February 2027\n  \ndue by\n26 August 2027\n\nLast accounts made up to 28 February 2026\n\n## Confirmation statement\n\nNext statement date 18 June 2027   \ndue by 2 July 2027\n\nLast statement dated 18 June 2026\n\n## Nature of business (SIC)\n\n* 47110 - Retail sale in non-specialised stores with food, beverages or tobacco predominating\n\n## Previous company names\n\n| Name | Period |\n| --- | --- |\n| TESCO STORES (HOLDINGS) PUBLIC LIMITED COMPANY | 14 Dec 1981 - 25 Aug 1983 |\n| TESCO STORES (HOLDINGS) LIMITED | 27 Nov 1947 - 14 Dec 1981 |",
+        "text_len": 974,
+        "errors": []
+      }
+    },
+    {
+      "name": "agent",
+      "ok": true,
+      "ms": 24539,
+      "value": {
+        "status": 200,
+        "run_status": "COMPLETED",
+        "result": {
+          "company_name": "TESCO PLC",
+          "company_number": "00445790",
+          "status": "Active",
+          "incorporation_date": "27 November 1947",
+          "registered_office": "Tesco House, Shire Park, Kestrel Way, Welwyn Garden City, United Kingdom, AL7 1GA"
+        },
+        "error": null,
+        "steps": 4
+      }
+    },
+    {
+      "name": "monitor_create",
+      "ok": true,
+      "ms": 3679,
+      "value": {
+        "status": 201,
+        "monitor": {
+          "id": "8c0c2d07-d08f-4cb6-a209-cc3b7cda72a1",
+          "name": "TinyVerify spike - Companies House",
+          "type": "fetch",
+          "config": {
+            "url": "https://find-and-update.company-information.service.gov.uk/company/00445790",
+            "format": "markdown",
+            "links": false,
+            "image_links": false,
+            "ttl": 0
+          },
+          "schedule_cron": "0 8 * * *",
+          "status": "active",
+          "last_error": null,
+          "webhook_url": null,
+          "created_at": "2026-11-04 12:40:12",
+          "updated_at": "2026-11-04 12:40:12"
+        },
+        "baseline_run": {
+          "id": "fcb15de7-6b20-4ba1-a37e-b6b434ef6ddb",
+          "is_baseline": true,
+          "text_head": "* Company Overview for TESCO PLC (00445790)\n* Filing history for TESCO PLC (00445790)\n* People for TESCO PLC (00445790)\n* Charges for TESCO PLC (00445790)\n* More for TESCO PLC (00445790)\n\n* Registered office address\n* Tesco House, Shire Park, Kestrel Way, Welwyn Garden City, United Kingdom, AL7 1GA\n"
+        }
+      }
+    },
+    {
+      "name": "monitor_run_and_delete",
+      "ok": true,
+      "ms": 2507,
+      "value": {
+        "monitor_id": "8c0c2d07-d08f-4cb6-a209-cc3b7cda72a1",
+        "run_id": "aa17364a-4cb2-43d6-b823-ad6c1ef9cddb",
+        "run_text_head": "* Company Overview for TESCO PLC (00445790)\n* Filing history for TESCO PLC (00445790)\n* People for TESCO PLC (00445790)\n* Charges for TESCO PLC (00445790)\n* More for TESCO PLC (00445790)\n\n* Registered office address\n* Tesco House, Shire Park, Kestrel Way, Welwyn Garden City, United Kingdom, AL7 1GA\n",
+        "deleted": {
+          "deleted": true,
+          "id": "8c0c2d07-d08f-4cb6-a209-cc3b7cda72a1"
+        }
+      }
+    }
+  ]
+}

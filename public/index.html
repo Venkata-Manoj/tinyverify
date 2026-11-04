@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="TinyVerify checks licences against official government registries and returns a live, sourced record with a timestamp — plus watch lists that alert you when a record changes.">
+  <title>TinyVerify — Live official registry checks</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230d1b2a'/%3E%3Cpath d='M4 8.5l2.5 2.5L12 5.5' stroke='%230f6b4f' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="shell header-row">
+      <a class="wordmark" href="/">TinyVerify</a>
+      <span class="badge-live"><svg aria-hidden="true" width="11" height="11" viewBox="0 0 10 10"><circle cx="5" cy="5" r="3.5" fill="currentColor"></circle></svg>Live official registries</span>
+    </div>
+  </header>
+
+  <main class="shell">
+    <section class="hero" aria-labelledby="hero-title">
+      <h1 id="hero-title" class="hero-title">Check a licence.<br>Trust the source.</h1>
+      <p class="hero-lede">TinyVerify reads the live record from the official registry and gives you the source link, the checked-at timestamp, and the option to watch that record for changes.</p>
+      <div class="panel verify-panel">
+        <form id="verify-form" novalidate>
+          <div class="field">
+            <label for="subject">Person or business name</label>
+            <input id="subject" name="subject" type="text" required autocomplete="off" spellcheck="false">
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label for="licence-type">Licence type</label>
+              <select id="licence-type" name="licence_type"></select>
+            </div>
+            <div class="field">
+              <label for="jurisdiction">Jurisdiction</label>
+              <select id="jurisdiction" name="jurisdiction"></select>
+            </div>
+          </div>
+          <details class="field-details">
+            <summary>Add a registration number</summary>
+            <div class="field">
+              <label for="number">Registration number (optional)</label>
+              <input id="number" name="number" type="text" autocomplete="off" spellcheck="false" inputmode="text">
+            </div>
+          </details>
+          <button type="submit" class="btn-primary" id="submit-button">Verify now</button>
+        </form>
+        <div class="samples">
+          <span class="samples-label">Try:</span>
+          <button type="button" class="chip sample-chip" data-subject="Tesco PLC" data-type="business" data-jurisdiction="UK" data-number="00445790">Tesco PLC · UK business</button>
+          <button type="button" class="chip sample-chip" data-subject="DONE RIGHT DISCOUNT FLOORING" data-type="contractor" data-jurisdiction="US-CA" data-number="738180">DONE RIGHT DISCOUNT FLOORING · CA contractor</button>
+          <button type="button" class="chip sample-chip" data-subject="Air New Zealand Limited" data-type="business" data-jurisdiction="NZ" data-number="104799">Air New Zealand Limited · NZ business</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="loading" class="panel loading-panel" role="status" aria-live="polite" aria-labelledby="loading-title" hidden>
+      <div class="progress-head">
+        <span id="loading-title" class="progress-label">Verifying <strong id="loading-subject-name"></strong></span>
+        <span class="progress-timer"><span id="loading-timer">0s</span><span class="progress-timer-hint">elapsed · may take up to 90 seconds</span></span>
+      </div>
+      <div class="indeterminate-bar" aria-hidden="true"><div class="indeterminate-bar-fill"></div></div>
+      <ol class="stages" id="stages"></ol>
+      <button type="button" class="btn-outline" id="verify-cancel">Cancel</button>
+    </section>
+
+    <div id="error-banner" class="error-banner" role="alert" aria-labelledby="error-title" hidden>
+      <h2 id="error-title" class="error-title">The check could not be completed</h2>
+      <p id="error-message" class="error-message"></p>
+    </div>
+
+    <section id="result" aria-labelledby="result-title" hidden>
+      <h2 id="result-title" class="result-heading" tabindex="-1"></h2>
+      <div id="result-body" aria-live="polite"></div>
+    </section>
+
+    <section id="monitors" class="monitors-section" aria-labelledby="monitors-title" hidden>
+      <div class="monitors-head">
+        <h2 id="monitors-title" class="section-heading">Watched records</h2>
+        <p class="section-sub">Checked on their schedule; changes are logged below.</p>
+      </div>
+      <div id="monitors-body"></div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="shell footer-row">
+      <span>TinyVerify · live reads from official public registries</span>
+      <span class="footer-note">Every result cites its source and checked-at time. Confirm at the source link.</span>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

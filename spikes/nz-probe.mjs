@@ -1,0 +1,10 @@
+﻿const UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+const u='https://app.companiesoffice.govt.nz/companies/app/ui/pages/companies/search?q=air+new+zealand';
+const r=await fetch(u,{headers:{'user-agent':UA},signal:AbortSignal.timeout(30000)});
+const h=await r.text();
+console.log('status',r.status,'bytes',h.length);
+const hrefs=[...new Set([...h.matchAll(/href="([^"]+)"/gi)].map(m=>m[1]).filter(x=>/\/companies\/\d+|entity|companyId|nzbn/i.test(x)))];
+console.log('HREFS',hrefs.slice(0,25));
+const text=h.replace(/<script[\s\S]*?<\/script>/gi,' ').replace(/<style[\s\S]*?<\/style>/gi,' ').replace(/<[^>]+>/g,'\n').replace(/&nbsp;/g,' ').replace(/&amp;/g,'&').replace(/[ \t]+/g,' ').replace(/\n\s*\n+/g,'\n').trim();
+const idx=text.search(/AIR NEW ZEALAND|Search results|results/i);
+console.log('SNIP\n',text.slice(Math.max(0,idx-500),idx+2500));

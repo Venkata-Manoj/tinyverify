@@ -1,0 +1,15 @@
+node_modules/
+.next/
+out/
+.env
+.env.local
+.vercel/
+data/
+dist/
+.tx/
+*.log
+spikes/*.log
+.playwright-mcp/
+
+.vercel
+.env*
