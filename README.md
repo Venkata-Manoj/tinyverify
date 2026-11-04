@@ -11,6 +11,8 @@ You give a **name**, a **record type** and a **jurisdiction**. TinyVerify reads 
 
 It never invents a record. If the official source cannot confirm one, the answer is `no_match`. If several records could be the same subject, every candidate is returned and none is auto-selected.
 
+![TinyVerify returning the live NZ Companies Office record for Air New Zealand Limited](docs/screenshot-exact.png)
+
 ---
 
 ## Try it
@@ -152,6 +154,8 @@ A transient registry miss — a timeout, a bot challenge, a page that no longer 
 | Type/jurisdiction we do not cover | `unsupported`, with the supported combinations |
 
 Name variants (comma order, missing legal suffix, middle initials) are tried at most twice. Two registries answering for the same subject are returned as separate records; if their statuses disagree the response is `status: "unknown"` with both records and an explicit conflict note, never a merge.
+
+![TinyVerify returning eleven candidates for "Air New Zealand" with no auto-selection](docs/screenshot-candidates.png)
 
 ---
 
