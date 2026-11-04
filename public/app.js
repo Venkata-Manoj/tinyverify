@@ -306,6 +306,7 @@
       renderResult(payload);
     } catch (err) {
       if (!controller.signal.aborted) {
+        console.error('verify failed', err);
         showError(err instanceof ApiError ? err.message : 'Unexpected failure — no result was produced.', err.code);
       }
       /* cancelled by the user → return quietly to the form */
@@ -700,7 +701,7 @@
       case 'no_match': renderer = renderNoMatchResult; break;
       default: renderer = () => renderPrimaryResult(payload);
     }
-    resultBodyEl.appendChild(renderer());
+    resultBodyEl.appendChild(renderer(payload));
 
     if (payload.duration_ms !== undefined) {
       resultBodyEl.appendChild(el('p', 'source-meta',
