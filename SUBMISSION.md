@@ -52,7 +52,7 @@ Air New Zealand Limited · business · NZ
   https://app.companiesoffice.govt.nz/co/104799
 
 Air New Zealand · business · NZ
-→ multiple · 10 candidates at the time of check, statuses preserved (active and expired), primary: null
+→ multiple · 11 candidates in the captured run, statuses preserved (active and expired), primary: null
 
 DONE RIGHT DISCOUNT FLOORING · contractor · US-CA
 → exact · revoked ("revoked and not able to contract") · 738180 · expiry 2017-05-28
@@ -67,6 +67,29 @@ Planise Jean Louis · health · US
 ZZZ Not A Real Company 999 · business · UK
 → no_match · 0 candidates · the searches that were run are listed
 ```
+
+---
+
+## Requirement map
+
+| Submission requirement | Where it is met |
+|---|---|
+| Name, licence or record type, jurisdiction | The form and `POST /api/verify` accept `subject`, `licence_type`, `jurisdiction`, plus an optional `number`. |
+| At least two official registries | Four: UK Companies House, NZ Companies Office, California CSLB, US NPPES — 3 record types, 3 countries. Listed by `GET /api/coverage`. |
+| Structured record | Every record carries `status`, `licence_number`, `expiry_date`, `disciplinary_actions`, `source_url`, `checked_at`, `status_detail`, `match_quality`, `registry_id`. See the JSON example above. |
+| TinyFish Monitor flags status changes | Each watch creates a scheduled TinyFish Monitor on the official URL with a webhook; `Check now` re-reads and diffs a five-field snapshot. |
+| Agent, Fetch and Monitor explanation | "How TinyFish is used" below, including what each endpoint contributes and why it is not padding. |
+
+| Approval criterion | Evidence |
+|---|---|
+| Results come live from the official source, with a link | Every record is built from a page or API read from the official source; `assertRecord()` rejects a record without an `http(s)` `source_url` and a parseable `checked_at`. Cached responses keep the original values and say `cached: true`. |
+| Accurate: status, numbers and dates match the registry | `Tesco PLC` → `00445790`, active. `Air New Zealand Limited` → `104799`, active. `DONE RIGHT DISCOUNT FLOORING` / `738180` → `revoked`, expiry `2017-05-28`, matching the CSLB page's "This license is revoked…". `Planise Jean Louis` / `1295346773` → active. |
+| No match or several matches handled without guessing | `ZZZ Not A Real Company 999` → `no_match` with the searches listed. `Air New Zealand` → `multiple` with 11 candidates and `primary: null`. Below-threshold names go to `near_misses`; unwired combinations return `unsupported`. |
+| Works for different people, businesses and places | Four registries across the UK, NZ and the US; business, contractor and health records; name-only, name + number and number-only lookups; name variants are tried and disclosed. |
+| Output is structured and reusable | Stable JSON contract, per-record `registry_id` and `source_url`, `checked_at`, and a documented HTTP API. Any tool can call `POST /api/verify` and store the result. |
+
+TinyFish scoring: **4 endpoints — Search, Fetch, Agent, Monitor — 200 points.** Each one is load-bearing;
+the table under "How TinyFish is used" states what breaks without it.
 
 ---
 
