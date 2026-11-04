@@ -34,6 +34,7 @@
   --p-active-fg: #0f6b4f;   --p-active-bg: #e7f2ec;
   --p-expired-fg: #7a4302;  --p-expired-bg: #f6ecdd;
   --p-suspended-fg: #8f1f23;--p-suspended-bg: #f8e4e4;
+  --p-revoked-fg: #6d1616;  --p-revoked-bg: #f3d8d8;
   --p-unknown-fg: #3c4a54;  --p-unknown-bg: #eaebe9;
 
   /* type */
@@ -236,6 +237,7 @@ main { padding: 40px 24px 56px; position: relative; }
 .pill-active { background: var(--p-active-bg); color: var(--p-active-fg); }
 .pill-expired { background: var(--p-expired-bg); color: var(--p-expired-fg); }
 .pill-suspended { background: var(--p-suspended-bg); color: var(--p-suspended-fg); }
+.pill-revoked { background: var(--p-revoked-bg); color: var(--p-revoked-fg); }
 .pill-unknown { background: var(--p-unknown-bg); color: var(--p-unknown-fg); }
 .pill .pill-tick, .pill .pill-x { flex: none; }
 

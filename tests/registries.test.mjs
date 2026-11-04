@@ -46,7 +46,7 @@ test('CSLB parser reads a revoked contractor licence', () => {
   assert.equal(parsed.exists, true);
   assert.equal(parsed.name, 'DONE RIGHT DISCOUNT FLOORING');
   assert.equal(parsed.number, '738180');
-  assert.equal(parsed.status, 'suspended');
+  assert.equal(parsed.status, 'revoked');
   assert.equal(parsed.fields.issue_date, '1997-07-17');
   assert.equal(parsed.fields.expire_date, '2017-05-28');
   assert.equal(parsed.fields.complaint_disclosure, 'on file');

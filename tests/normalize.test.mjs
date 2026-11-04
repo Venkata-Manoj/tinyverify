@@ -36,9 +36,10 @@ test('nameSimilarity and classifyMatch are conservative', () => {
   assert.ok(nameSimilarity('MacDonald', 'McDonald') > 0.9);
 });
 
-test('normalizeStatus maps registry wording into the four-value vocabulary', () => {
+test('normalizeStatus maps registry wording into the five-value vocabulary', () => {
   assert.equal(normalizeStatus('Active').status, 'active');
-  assert.equal(normalizeStatus('This license is revoked and not able to contract at this time.').status, 'suspended');
+  assert.equal(normalizeStatus('This license is revoked and not able to contract at this time.').status, 'revoked');
+  assert.equal(normalizeStatus('Suspended pending hearing').status, 'suspended');
   assert.equal(normalizeStatus('Dissolved').status, 'expired');
   assert.equal(normalizeStatus('Struck off').status, 'expired');
   assert.equal(normalizeStatus('Something new').status, 'unknown');

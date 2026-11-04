@@ -40,7 +40,7 @@ Four official sources are wired. Each adapter lives in `lib/registries/`, declar
 **Caveats**
 
 - Companies have no expiry date. `expiry_date` is `null` and a note explains that the register has no such concept.
-- Disciplinary actions are not a Companies House concept; the record says `["none found"]` with a note.
+- Disciplinary actions are not a Companies House concept; the record says `["not published by this registry"]` with a note pointing to the separate disqualification register.
 - The register lists some entities as `Active - proposal to strike off`. The mapper keeps the native wording and classifies it `active`; the detail string carries the warning.
 
 ---

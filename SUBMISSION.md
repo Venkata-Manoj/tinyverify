@@ -55,7 +55,7 @@ Air New Zealand · business · NZ
 → multiple · 11 candidates, statuses preserved (active and expired), primary: null
 
 DONE RIGHT DISCOUNT FLOORING · contractor · US-CA
-→ exact · suspended ("revoked and not able to contract") · 738180 · expiry 2017-05-28
+→ exact · revoked ("revoked and not able to contract") · 738180 · expiry 2017-05-28
   public complaint disclosure on file
 
 HALA TREE SERVICE · contractor · US-CA

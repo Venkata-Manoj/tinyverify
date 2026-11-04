@@ -94,7 +94,7 @@
     return null;
   }
 
-  const STATUS_LABELS = { active: 'Active', expired: 'Expired', suspended: 'Suspended', unknown: 'Unknown' };
+  const STATUS_LABELS = { active: 'Active', expired: 'Expired', suspended: 'Suspended', revoked: 'Revoked', unknown: 'Unknown' };
 
   /* ---------------- api ---------------- */
 

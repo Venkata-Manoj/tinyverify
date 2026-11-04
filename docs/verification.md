@@ -12,12 +12,12 @@ A record is only returned when TinyVerify has **read the official registry durin
 | `checked_at` | ISO timestamp of the live read | Must parse as a date; cache preserves the original value |
 | `source_name` | Registry name shown to the user | Required, non-empty |
 | `registry_id` | Stable adapter id (`companies-house-uk`, `cslb-ca`, `npi-us`, `nz-companies`) | Set by the pipeline |
-| `status` | `active` / `expired` / `suspended` / `unknown` | Only these four values are accepted |
+| `status` | `active` / `expired` / `suspended` / `revoked` / `unknown` | Only these five values are accepted |
 | `status_detail` | Registry's own wording, unchanged | Stored alongside the mapped status |
 | `match_quality` | `exact` / `close` / `multiple` / `no_match` / `unsupported` | Only these five values are accepted |
 | `licence_number` | Registration / licence / NPI number | `null` only when the registry has no such concept |
 | `expiry_date` | `YYYY-MM-DD` or `null` | Never inferred from other dates |
-| `disciplinary_actions` | Array; `["none found"]` when the registry shows none | Empty arrays are normalised to `["none found"]` |
+| `disciplinary_actions` | Array; `["none found"]` when the registry shows a disciplinary section with no entries | Empty arrays are normalised to `["none found"]`; registers that publish no disciplinary data say `["not published by this registry"]` |
 
 `makeRecord()` in `lib/schema.js` builds this shape and `assertRecord()` validates it. A parser that cannot fill the required fields returns no record instead of a partial one.
 
@@ -55,12 +55,13 @@ Two registries resolving the same subject are returned as **separate records** w
 
 ## 4. Status mapping
 
-Registry wording is mapped to a shared four-value vocabulary, but the original string is always kept in `status_detail`.
+Registry wording is mapped to a shared five-value vocabulary, but the original string is always kept in `status_detail`.
 
 | Registry says | Mapped status |
 |---|---|
 | Active, Registered, Current, Licensed, Valid, In good standing | `active` |
-| Suspended, Revoked, Restricted, Conditions, Interim order, Prohibited, Disqualified | `suspended` |
+| Revoked, Revocation | `revoked` |
+| Suspended, Restricted, Conditions, Interim order, Prohibited, Disqualified | `suspended` |
 | Expired, Lapsed, Dissolved, Closed, Ceased, Surrendered, Inactive, Removed, Cancelled, Struck off, Withdrawn | `expired` |
 | Anything else | `unknown` |
 
@@ -102,7 +103,7 @@ These were run against the live sources during the build. Expected values are th
 | `ZZZ Not A Real Company 999` | business / UK | `no_match`, suggestions, no invented record |
 | `Air New Zealand Limited` | business / NZ | `exact`, `active`, `104799`, NZBN `9429040402543` |
 | `Air New Zealand` | business / NZ | `multiple`, 9+ candidates, statuses preserved (active/expired) |
-| `DONE RIGHT DISCOUNT FLOORING` / `738180` | contractor / US-CA | `exact`, `suspended`, expiry `2017-05-28`, complaint disclosure on file |
+| `DONE RIGHT DISCOUNT FLOORING` / `738180` | contractor / US-CA | `exact`, `revoked`, expiry `2017-05-28`, complaint disclosure on file |
 | `HALA TREE SERVICE` | contractor / US-CA | Agent fallback → `multiple`, `574648` and `1000000`, both `expired` |
 | `Planise Jean Louis` / `1295346773` | health / US | `exact`, `active`, NPI `1295346773`, FL APRN licence |
 | `Mayo Clinic` | health / US | `multiple`, 10 candidates, no auto-pick |

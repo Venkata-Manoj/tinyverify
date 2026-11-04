@@ -55,7 +55,7 @@ Every adapter returns the same record shape, so adding a registry does not chang
   "status": "active",
   "licence_number": "00445790",
   "expiry_date": null,
-  "disciplinary_actions": ["none found"],
+  "disciplinary_actions": ["not published by this registry"],
   "source_name": "UK Companies House",
   "source_url": "https://find-and-update.company-information.service.gov.uk/company/00445790",
   "checked_at": "2026-11-04T12:55:10.106Z",
@@ -69,7 +69,7 @@ Every adapter returns the same record shape, so adding a registry does not chang
     "registered_office": "Tesco House, Shire Park, Kestrel Way, Welwyn Garden City, United Kingdom, AL7 1GA",
     "sic": ["47110 - Retail sale in non-specialised stores with food, beverages or tobacco predominating"]
   },
-  "notes": []
+  "notes": ["This overview page does not list disciplinary actions; officer disqualifications are a separate register."]
 }
 ```
 
