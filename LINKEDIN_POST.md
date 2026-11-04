@@ -29,7 +29,7 @@ Then it watches. A watch stores a snapshot of status, number, expiry and discipl
 Live demo: https://tinyverify.vercel.app
 Code: https://github.com/Venkata-Manoj/tinyverify
 
-Node 22, zero runtime dependencies, 33 unit tests against pages captured from the live registries. Try the three sample chips — UK, NZ and California — or paste a licence number for an exact lookup.
+Node 22, zero runtime dependencies, 33 unit tests against pages captured from the live registries. Try the three sample chips — UK, NZ and California — or put a licence number in the optional number field for an exact lookup.
 
 #TinyFish #AI #Compliance #OpenSource
 
