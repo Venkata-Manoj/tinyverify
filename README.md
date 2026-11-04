@@ -215,7 +215,7 @@ KV_REST_API_URL=...
 KV_REST_API_TOKEN=...
 ```
 
-Monitors persist in Upstash Redis (`KV_REST_API_URL` + `KV_REST_API_TOKEN`) in production, or an atomic JSON file under `data/` locally. The TinyFish API key is only read server-side and is never returned by any endpoint.
+Monitors persist in Upstash Redis when `KV_REST_API_URL` and `KV_REST_API_TOKEN` are set, otherwise in an atomic JSON file under `data/` (local development). The TinyFish API key is only read server-side and is never returned by any endpoint.
 
 ---
 
