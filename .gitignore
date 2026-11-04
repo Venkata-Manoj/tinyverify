@@ -13,3 +13,4 @@ spikes/*.log
 
 .vercel
 .env*
+!.env.example

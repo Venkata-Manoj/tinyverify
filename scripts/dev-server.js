@@ -26,9 +26,22 @@ const MIME = new Map([
   ['.map', 'application/json; charset=utf-8'],
 ]);
 
+const SECURITY_HEADERS = {
+  'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'self'; frame-ancestors 'none'",
+  'Referrer-Policy': 'no-referrer',
+  'X-Frame-Options': 'DENY',
+  'X-Content-Type-Options': 'nosniff',
+  'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+};
+
+function applySecurityHeaders(res) {
+  for (const [key, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(key, value);
+}
+
 function sendText(res, status, text, headers = {}) {
   res.statusCode = status;
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  applySecurityHeaders(res);
   for (const [key, value] of Object.entries(headers)) res.setHeader(key, value);
   res.end(text);
 }
@@ -69,7 +82,7 @@ async function serveStatic(req, res) {
     res.statusCode = 200;
     res.setHeader('Content-Type', MIME.get(extname(filePath).toLowerCase()) || 'application/octet-stream');
     res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('X-Content-Type-Options', 'nosniff');
+    applySecurityHeaders(res);
     if (req.method === 'HEAD') res.end();
     else res.end(body);
   } catch {

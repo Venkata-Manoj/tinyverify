@@ -18,13 +18,15 @@ TinyVerify checks a person, business or contractor against live official registr
 | `public/` | Static UI (vanilla JS, no build step) |
 | `api/index.js` | Legacy Vercel function entry (not used by the current deployment) |
 | `scripts/dev-server.js` | HTTP server for local dev; also the Vercel server entrypoint |
-| `lib/router.js` | API routes, body limits, CORS, webhook signature |
+| `lib/router.js` | API routes, body limits, CORS, webhook signature, rate limits |
 | `lib/verify.js` | Validation, variants, matching, response assembly |
 | `lib/schema.js` | Record contract, snapshots, diffing, conflict handling |
 | `lib/registry.js` | Adapter registry and coverage matrix |
 | `lib/registries/` | One adapter per official source |
 | `lib/tinyfish.js` | TinyFish Search / Fetch / Agent / Monitor client |
-| `lib/monitors.js` | Watch creation, check, webhook, delete |
+| `lib/monitors.js` | Watch creation, check, webhook, delete, owner scoping |
+| `lib/owner.js` | Hashes the browser watch token; never stores the token |
+| `lib/ratelimit.js` | Per-instance cost guard for paid endpoints |
 | `lib/store.js` | KV/Upstash or atomic file persistence |
 | `tests/` | Node test runner, no network; fixtures captured from live pages |
 | `docs/` | Verification rules and registry research |
@@ -56,4 +58,6 @@ Deployment: Vercel, no build step. `scripts/dev-server.js` serves `public/` and 
 - Vercel detects `scripts/dev-server.js` through `package.json#main`. Do not rename it without updating `main` and `vercel.json`.
 - `public/**` must stay in `includeFiles` or static assets 404 inside the function bundle.
 - Monitors use Upstash Redis when `KV_REST_API_URL` and `KV_REST_API_TOKEN` exist, otherwise a file under `TINYVERIFY_DATA_DIR`.
+- `TINYVERIFY_PUBLIC_URL` is the canonical HTTPS origin for TinyFish Monitor webhooks. Never derive it from the request Host header; on Vercel the code falls back to `VERCEL_PROJECT_PRODUCTION_URL`.
 - The webhook is public; set `TINYVERIFY_WEBHOOK_SECRET` to require a token or HMAC signature.
+- Watches are scoped by the browser's `X-TinyVerify-Owner` token. The server stores only the SHA-256 hash.

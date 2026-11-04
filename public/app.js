@@ -104,6 +104,26 @@
     constructor(message, code) { super(message); this.code = code || 'UNKNOWN'; }
   }
 
+  /* A random per-browser token scopes watches to this browser. The server
+     stores only its hash and never returns it. */
+  const OWNER_KEY = 'tinyverify.owner.v1';
+
+  function ownerToken() {
+    try {
+      const stored = localStorage.getItem(OWNER_KEY);
+      if (/^[a-f0-9]{32}$/.test(stored || '')) return stored;
+      const bytes = new Uint8Array(16);
+      crypto.getRandomValues(bytes);
+      const token = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+      localStorage.setItem(OWNER_KEY, token);
+      return token;
+    } catch {
+      return null;
+    }
+  }
+
+  const OWNER = ownerToken();
+
   async function readJsonBody(res) {
     try { return await res.json(); } catch { return null; }
   }
@@ -119,9 +139,11 @@
     const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
     let res;
     try {
+      const headers = Object.assign({ 'Accept': 'application/json' }, body ? { 'Content-Type': 'application/json' } : null);
+      if (OWNER) headers['X-TinyVerify-Owner'] = OWNER;
       res = await fetch(path, {
         method,
-        headers: Object.assign({ 'Accept': 'application/json' }, body ? { 'Content-Type': 'application/json' } : null),
+        headers,
         body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal
       });
@@ -141,8 +163,8 @@
 
   /* ---------------- app state ---------------- */
 
-  const FALLBACK_TYPES = ['business', 'medical', 'health'];
-  const FALLBACK_JURISDICTIONS = ['UK', 'NZ', 'AU'];
+  const FALLBACK_TYPES = ['business', 'contractor', 'health'];
+  const FALLBACK_JURISDICTIONS = ['UK', 'NZ', 'US', 'US-CA'];
 
   const state = {
     modes: [],            // supported {type, jurisdiction, registry} combinations
@@ -352,8 +374,19 @@
 
   /* ---------------- result renderers ---------------- */
 
+  function safeHttpUrl(value) {
+    try {
+      const url = new URL(String(value), document.baseURI);
+      return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : null;
+    } catch {
+      return null;
+    }
+  }
+
   function sourceAnchor(url, text, cls) {
-    const a = el('a', cls, text, { href: url, target: '_blank', rel: 'noopener noreferrer' });
+    const href = safeHttpUrl(url);
+    if (!href) return el('span', cls, text);
+    const a = el('a', cls, text, { href, target: '_blank', rel: 'noopener noreferrer' });
     a.appendChild(icon('arrow-up-right'));
     return a;
   }
@@ -655,8 +688,10 @@
   function renderNoMatchResult(payload) {
     const body = el('div', 'result-record');
     body.appendChild(el('p', 'no-match-lede',
-      'No record was found in the official registries for this subject, licence type and jurisdiction. '
-      + 'This is not a clearance: the name may be recorded differently, or the record may sit in a registry not connected here.'));
+      payload.incomplete
+        ? 'No confident record was returned by the registries that responded. One or more registries could not be reached, so this is not a clearance: the name may be recorded differently, or the record may sit in a registry not connected here.'
+        : 'No record was found in the official registries for this subject, licence type and jurisdiction. '
+          + 'This is not a clearance: the name may be recorded differently, or the record may sit in a registry not connected here.'));
     const searched = payload.searched || [];
     if (searched.length) {
       body.appendChild(el('p', 'section-label', 'What was searched'));
@@ -701,6 +736,17 @@
       case 'no_match': renderer = renderNoMatchResult; break;
       default: renderer = () => renderPrimaryResult(payload);
     }
+
+    if (payload.incomplete && Array.isArray(payload.errors) && payload.errors.length) {
+      const warn = el('div', 'monitor-inline-banner p-change');
+      warn.appendChild(el('h4', null, 'Incomplete result'));
+      warn.appendChild(el('p', null,
+        `These registries could not be read: ${payload.errors
+          .map((e) => `${e.registry_name || e.registry_id || 'registry'} — ${e.message}`)
+          .join(' · ')}`));
+      resultBodyEl.appendChild(warn);
+    }
+
     resultBodyEl.appendChild(renderer(payload));
 
     if (payload.duration_ms !== undefined) {

@@ -34,7 +34,7 @@ Watches store a snapshot (status, number, expiry, disciplinary, status detail) a
 check. A registry outage keeps the previous snapshot and emits no event — "the site was down"
 is not "the licence was revoked".
 
-33 unit tests on pages captured from the live registries, zero runtime deps, Node 22.
+40 unit tests on pages captured from the live registries, zero runtime deps, Node 22.
 Known gaps are documented rather than faked: HCPC sits behind Cloudflare, GMC is client-rendered,
 AHPRA only works through a buffed agent run and would need a disambiguation rule.
 ```

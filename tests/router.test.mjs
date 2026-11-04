@@ -99,4 +99,41 @@ test('unknown routes return a JSON 404 and CORS preflight is handled', async () 
   const preflight = await call('/api/verify', { method: 'OPTIONS' });
   assert.equal(preflight.status, 204);
   assert.equal(preflight.headers.get('access-control-allow-origin'), '*');
+  assert.match(preflight.headers.get('access-control-allow-headers'), /X-TinyVerify-Owner/i);
+});
+
+test('oversized bodies return 413 instead of crashing the function', async () => {
+  const body = JSON.stringify({ subject: 'x'.repeat(70 * 1024), licence_type: 'business', jurisdiction: 'UK' });
+  const res = await fetch(`${base}/api/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+  });
+  assert.equal(res.status, 413);
+  const data = await res.json();
+  assert.equal(data.error.code, 'PAYLOAD_TOO_LARGE');
+});
+
+test('non-JSON content types and overlong numbers are rejected before any registry call', async () => {
+  const wrongType = await fetch(`${base}/api/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: JSON.stringify({ subject: 'Tesco PLC', licence_type: 'business', jurisdiction: 'UK' }),
+  });
+  assert.equal(wrongType.status, 415);
+  assert.equal((await wrongType.json()).error.code, 'UNSUPPORTED_MEDIA_TYPE');
+
+  const longNumber = await call('/api/verify', {
+    method: 'POST',
+    body: { number: '1'.repeat(40), licence_type: 'contractor', jurisdiction: 'US-CA' },
+  });
+  assert.equal(longNumber.status, 400);
+  assert.equal(longNumber.data.error.code, 'BAD_REQUEST');
+});
+
+test('API responses carry clickjacking and referrer protections', async () => {
+  const { headers } = await call('/api/health');
+  assert.equal(headers.get('x-frame-options'), 'DENY');
+  assert.equal(headers.get('referrer-policy'), 'no-referrer');
+  assert.equal(headers.get('x-content-type-options'), 'nosniff');
 });

@@ -120,3 +120,27 @@ test('deleteWatch removes the local watch and the TinyFish monitor', async () =>
   assert.equal(deletedTinyfishId, 'tf_fake_1');
   await assert.rejects(() => getWatch(monitorId), (err) => err.status === 404);
 });
+
+test('watches are scoped to the browser token that created them', async () => {
+  const owner = 'a'.repeat(64);
+  const other = 'b'.repeat(64);
+  const created = await createWatch(
+    { subject: 'Tesco PLC', licence_type: 'business', jurisdiction: 'UK' },
+    { verifyFn: async () => verification(record()), createMonitorFn: fakeCreateMonitor, ownerHash: owner },
+  );
+  const id = created.monitor.id;
+  assert.equal('owner_hash' in created.monitor, false);
+
+  assert.ok((await listWatches({ ownerHash: owner })).some((monitor) => monitor.id === id));
+  assert.equal((await listWatches({ ownerHash: other })).some((monitor) => monitor.id === id), false);
+  assert.deepEqual(await listWatches({ ownerHash: null }), []);
+
+  await assert.rejects(() => getWatch(id, { ownerHash: other }), (err) => err.status === 404);
+  await assert.rejects(
+    () => deleteWatch(id, { ownerHash: other, deleteMonitorFn: fakeDeleteMonitor }),
+    (err) => err.status === 404,
+  );
+
+  const deleted = await deleteWatch(id, { ownerHash: owner, deleteMonitorFn: fakeDeleteMonitor });
+  assert.equal(deleted.deleted, true);
+});
