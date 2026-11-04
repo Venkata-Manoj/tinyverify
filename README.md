@@ -1,7 +1,7 @@
 # TinyVerify
 
 **Live demo:** https://tinyverify.vercel.app
-**Repo:** https://github.com/&lt;your-handle&gt;/tinyverify (replace with the published repo URL)
+**Repo:** https://github.com/Venkata-Manoj/tinyverify
 
 TinyVerify answers a question a hiring manager or compliance team actually has to answer:
 
