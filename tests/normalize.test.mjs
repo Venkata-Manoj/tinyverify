@@ -34,16 +34,26 @@ test('nameSimilarity and classifyMatch are conservative', () => {
   assert.equal(classifyMatch('Tesco', 'TESCO PLC'), 'close');
   assert.equal(classifyMatch('Hala Tree Service', 'HALABI CONSTRUCTION'), 'no_match');
   assert.ok(nameSimilarity('MacDonald', 'McDonald') > 0.9);
+  // Regression: a nonsense query must not match a generic "STORE LOCATOR ..." name.
+  assert.equal(classifyMatch('qwzxv plorb', 'STORE LOCATOR WIDGETS LTD'), 'no_match');
+  // Every query token must occur in the candidate; "John" alone cannot match "Johnathan".
+  assert.equal(classifyMatch('John Smith', 'JOHNATHAN SMITH'), 'no_match');
 });
 
-test('normalizeStatus maps registry wording into the five-value vocabulary', () => {
+test('normalizeStatus maps registry wording into the eight-value vocabulary', () => {
   assert.equal(normalizeStatus('Active').status, 'active');
   assert.equal(normalizeStatus('This license is revoked and not able to contract at this time.').status, 'revoked');
   assert.equal(normalizeStatus('Suspended pending hearing').status, 'suspended');
-  assert.equal(normalizeStatus('Dissolved').status, 'expired');
-  assert.equal(normalizeStatus('Struck off').status, 'expired');
+  assert.equal(normalizeStatus('Dissolved').status, 'dissolved');
+  assert.equal(normalizeStatus('Struck off').status, 'dissolved');
+  assert.equal(normalizeStatus('Liquidation').status, 'in_liquidation');
+  assert.equal(normalizeStatus('Cancelled').status, 'inactive');
+  assert.equal(normalizeStatus('Null And Void').status, 'inactive');
+  assert.equal(normalizeStatus('Delinquent/Active').status, 'expired');
   assert.equal(normalizeStatus('Something new').status, 'unknown');
   assert.equal(normalizeStatus('').status, 'unknown');
+  // The native wording is always preserved for status_detail.
+  assert.equal(normalizeStatus('Dissolved').detail, 'Dissolved');
 });
 
 test('normalizeDate handles day-first and month-first registry formats', () => {
