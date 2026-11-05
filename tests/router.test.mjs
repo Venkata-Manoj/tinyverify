@@ -8,6 +8,7 @@ import { join } from 'node:path';
 const dataDir = await mkdtemp(join(tmpdir(), 'tinyverify-router-'));
 process.env.TINYVERIFY_DATA_DIR = dataDir;
 process.env.TINYVERIFY_LOG = '0';
+process.env.TINYVERIFY_WEBHOOK_SECRET = 'test-webhook-secret';
 
 const { handleRequest } = await import('../lib/router.js');
 
@@ -42,20 +43,27 @@ test('GET /api/health reports configuration without leaking the key', async () =
   assert.equal(status, 200);
   assert.equal(data.ok, true);
   assert.equal(typeof data.api_key_configured, 'boolean');
+  assert.equal(typeof data.demo, 'boolean');
   assert.equal(typeof data.storage, 'string');
+  assert.equal(JSON.stringify(data).includes('TINYFISH_API_KEY'), false);
 });
 
 test('GET /api/registries exposes the live coverage matrix', async () => {
   const { status, data } = await call('/api/registries');
   assert.equal(status, 200);
   assert.equal(data.ok, true);
-  assert.deepEqual(data.registries.map((r) => r.id).sort(), ['companies-house-uk', 'cslb-ca', 'npi-us', 'nz-companies']);
+  assert.deepEqual(data.registries.map((r) => r.id).sort(), [
+    'abn-au', 'companies-house-uk', 'cslb-ca', 'mqa-fl', 'npi-us', 'nz-companies',
+  ]);
   assert.deepEqual(data.combinations.map((c) => `${c.licence_type}/${c.jurisdiction}`).sort(), [
+    'business/AU',
     'business/NZ',
     'business/UK',
     'contractor/US-CA',
     'health/US',
+    'health/US-FL',
   ]);
+  assert.deepEqual(data.registries.find((r) => r.id === 'mqa-fl').jurisdictions, ['US-FL']);
 });
 
 test('POST /api/verify validates input before calling any registry', async () => {
@@ -81,14 +89,34 @@ test('monitor routes return structured 404s', async () => {
   assert.equal(del.status, 404);
 });
 
-test('GET /api/monitors starts empty and the webhook ignores unknown ids', async () => {
+test('GET /api/monitors starts empty and the webhook verifies its token', async () => {
   const list = await call('/api/monitors');
   assert.equal(list.status, 200);
   assert.deepEqual(list.data.monitors, []);
 
-  const hook = await call('/api/webhooks/tinyfish', { method: 'POST', body: { monitor_id: 'not-ours', event: 'change' } });
+  const unsigned = await call('/api/webhooks/tinyfish', { method: 'POST', body: { monitor_id: 'not-ours', event: 'change' } });
+  assert.equal(unsigned.status, 401);
+  assert.equal(unsigned.data.error.code, 'BAD_SIGNATURE');
+
+  const hook = await call('/api/webhooks/tinyfish?token=test-webhook-secret', {
+    method: 'POST',
+    body: { monitor_id: 'not-ours', event: 'change' },
+  });
   assert.equal(hook.status, 200);
   assert.equal(hook.data.ignored, true);
+});
+
+test('watching requires an owner token and anonymous refresh is ignored', async () => {
+  const create = await call('/api/monitors', {
+    method: 'POST',
+    body: { subject: 'Tesco PLC', licence_type: 'business', jurisdiction: 'UK' },
+  });
+  assert.equal(create.status, 401);
+  assert.equal(create.data.error.code, 'OWNER_REQUIRED');
+
+  const list = await call('/api/monitors', { headers: { 'X-TinyVerify-Owner': 'a'.repeat(32) } });
+  assert.equal(list.status, 200);
+  assert.deepEqual(list.data.monitors, []);
 });
 
 test('unknown routes return a JSON 404 and CORS preflight is handled', async () => {
