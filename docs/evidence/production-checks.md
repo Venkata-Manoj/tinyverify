@@ -1,6 +1,6 @@
 # Production verification — 5 Nov 2026
 
-Deployment: `https://tinyverify.vercel.app` (Vercel deployment `dpl_FNjVU158WQg8y8woYJuLS4aAorg7`, code commit `ab86a70`, version `0.2.0`).
+Deployment: `https://tinyverify.vercel.app` (code commit `ab86a70`, docs commit `7868308`). Functional checks ran against the `ab86a70` build; the later commit changes only the README and this evidence file, not runtime code.
 
 All checks below were run against the production URL, not localhost. Requests used `curl.exe`; JSON was reduced to the fields shown. No secrets, watch tokens, webhook URLs or admin keys are recorded here.
 
