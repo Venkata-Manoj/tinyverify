@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseCompanyPage, parseSearchLinks } from '../lib/registries/companies-house.js';
+import { parseCompanyPage, parseSearchLinks, normalizeCompanyNumber } from '../lib/registries/companies-house.js';
+import { nameSimilarity, normalizeName } from '../lib/normalize.js';
 import { parseComplaintDisclosure, parseCslbPage, readCslbPages } from '../lib/registries/cslb.js';
 import { parseNpiResult } from '../lib/registries/npi.js';
 import { parseNzRecord, parseNzSearch } from '../lib/registries/nz-companies.js';
@@ -37,10 +38,48 @@ test('Companies House search links are restricted to company records', () => {
   const numbers = parseSearchLinks([
     'https://find-and-update.company-information.service.gov.uk/company/00445790',
     'https://find-and-update.company-information.service.gov.uk/company/SC123456/',
+    'https://find-and-update.company-information.service.gov.uk/company/BRADFORD',
     'https://find-and-update.company-information.service.gov.uk/search/companies?q=tesco',
     'https://evil.example/company/12345678',
   ]);
   assert.deepEqual(numbers, ['00445790', 'SC123456']);
+});
+
+test('Companies House parser keeps a parenthesised place name out of the number', () => {
+  const parsed = parseCompanyPage(read('companies-house-ms-bradford.md'), {
+    url: 'https://find-and-update.company-information.service.gov.uk/company/10011863',
+    title: 'MARKS AND SPENCER (BRADFORD) LIMITED overview - Find and update company information - GOV.UK',
+  });
+  assert.equal(parsed.number, '10011863');
+  assert.equal(parsed.name, 'MARKS AND SPENCER (BRADFORD) LIMITED');
+  assert.equal(parsed.status, 'active');
+});
+
+test('Companies House parser reads a dotted P.L.C. legal name', () => {
+  const parsed = parseCompanyPage(read('companies-house-ms-group.md'), {
+    url: 'https://find-and-update.company-information.service.gov.uk/company/04256886',
+    title: 'MARKS AND SPENCER GROUP P.L.C. overview - Find and update company information - GOV.UK',
+  });
+  assert.equal(parsed.number, '04256886');
+  assert.equal(parsed.name, 'MARKS AND SPENCER GROUP P.L.C.');
+  assert.equal(parsed.status, 'active');
+  assert.equal(parsed.fields.company_type, 'Public limited Company');
+});
+
+test('company numbers are validated and zero-padded, never guessed from a place name', () => {
+  assert.equal(normalizeCompanyNumber('00445790'), '00445790');
+  assert.equal(normalizeCompanyNumber('445790'), '00445790');
+  assert.equal(normalizeCompanyNumber('SC123456'), 'SC123456');
+  assert.equal(normalizeCompanyNumber('SC 123 456'), 'SC123456');
+  assert.equal(normalizeCompanyNumber('BRADFORD'), null);
+  assert.equal(normalizeCompanyNumber('1234567'), '01234567');
+  assert.equal(normalizeCompanyNumber('123456789'), null);
+});
+
+test('name comparison folds ampersands and dotted legal suffixes', () => {
+  assert.equal(normalizeName('Marks & Spencer Group P.L.C.'), 'marks and spencer group public limited company');
+  assert.equal(nameSimilarity('Marks and Spencer Group', 'MARKS AND SPENCER GROUP P.L.C.'), 0.99);
+  assert.equal(nameSimilarity('Marks & Spencer', 'MARKS AND SPENCER P.L.C.'), 0.99);
 });
 
 test('CSLB parser reads a revoked contractor licence', () => {
@@ -82,6 +121,8 @@ test('NPI parser reads an individual provider record', () => {
   assert.equal(parsed.fields.primary_taxonomy, 'Nurse Practitioner, Family');
   assert.equal(parsed.fields.state_licence_number, 'APRN00000000');
   assert.equal(parsed.fields.state_licence_state, 'FL');
+  assert.equal(parsed.fields.location_city, 'SAMPLE CITY');
+  assert.equal(parsed.fields.location_state, 'FL');
 });
 
 test('NPI parser reads an organisation record', () => {
@@ -109,10 +150,10 @@ test('registry resolution accepts aliases and rejects unsupported pairs', () => 
 test('coverage matrix only lists combinations we can actually serve', () => {
   const matrix = coverageMatrix();
   assert.deepEqual(matrix.types.sort(), ['business', 'contractor', 'health']);
-  assert.deepEqual(matrix.jurisdictions.sort(), ['AU', 'NZ', 'UK', 'US', 'US-CA', 'US-FL']);
+  assert.deepEqual(matrix.jurisdictions.sort(), ['AU', 'NZ', 'UK', 'US', 'US-CA', 'US-FL', 'US-TX']);
   assert.deepEqual(
     matrix.combinations.map((c) => `${c.licence_type}/${c.jurisdiction}`).sort(),
-    ['business/AU', 'business/NZ', 'business/UK', 'contractor/US-CA', 'health/US', 'health/US-FL'],
+    ['business/AU', 'business/NZ', 'business/UK', 'contractor/US-CA', 'health/US', 'health/US-FL', 'health/US-TX'],
   );
   for (const combo of matrix.combinations) assert.ok(combo.registries.length > 0);
 });
@@ -144,6 +185,28 @@ test('ABN checksum rejects transposed or invented numbers', () => {
   assert.equal(isValidAbn('33051775557'), false);
   assert.equal(isValidAbn('12345678901'), false);
   assert.equal(isValidAbn('123'), false);
+});
+
+test('ABN all-results search includes cancelled ABNs, not only active ones', () => {
+  const { total, results } = parseAbnSearch(read('abn-search-all.html'));
+  assert.equal(total, 155);
+  const cancelled = results.find((row) => row.abn === '97342304522');
+  assert.equal(cancelled.name, 'THE WOOLWORTHS');
+  assert.equal(cancelled.status, 'cancelled');
+  assert.equal(cancelled.raw_status, 'Cancelled');
+  const woolworths = results.find((row) => row.abn === '88000014675');
+  assert.equal(woolworths.status, 'active');
+});
+
+test('ABN detail page reports a cancellation date and native status', () => {
+  const parsed = parseAbnPage(read('abn-detail-cancelled.html'), {
+    url: 'https://abr.business.gov.au/ABN/View?id=97342304522',
+  });
+  assert.equal(parsed.number, '97342304522');
+  assert.equal(parsed.name, 'THE WOOLWORTHS');
+  assert.equal(parsed.status, 'cancelled');
+  assert.equal(parsed.status_detail, 'Cancelled from 14 Oct 2016');
+  assert.equal(parsed.fields.cancellation_date, '2016-10-14');
 });
 
 test('Florida MQA parsers read the search table and a physician detail page', () => {

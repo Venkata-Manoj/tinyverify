@@ -101,6 +101,7 @@
     revoked: 'Revoked',
     dissolved: 'Dissolved',
     in_liquidation: 'In liquidation',
+    cancelled: 'Cancelled',
     inactive: 'Inactive',
     unknown: 'Unknown'
   };
@@ -113,25 +114,43 @@
     constructor(message, code) { super(message); this.code = code || 'UNKNOWN'; }
   }
 
-  /* A random per-browser token scopes watches to this browser. The server
-     stores only its hash and never returns it. */
+  /* A signed per-browser owner token scopes watches to this browser. The server
+     issues it via /api/owner, validates the signature, and stores only its hash.
+     Legacy browser-minted tokens are still read (so old watches survive) but
+     cannot create new watches. */
   const OWNER_KEY = 'tinyverify.owner.v1';
 
-  function ownerToken() {
-    try {
-      const stored = localStorage.getItem(OWNER_KEY);
-      if (/^[a-f0-9]{32}$/.test(stored || '')) return stored;
-      const bytes = new Uint8Array(16);
-      crypto.getRandomValues(bytes);
-      const token = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-      localStorage.setItem(OWNER_KEY, token);
-      return token;
-    } catch {
-      return null;
-    }
+  function storedOwnerToken() {
+    try { return localStorage.getItem(OWNER_KEY); } catch { return null; }
   }
 
-  const OWNER = ownerToken();
+  function isSignedOwnerToken(token) {
+    return /^tv1\.[a-f0-9]{32}\.[a-f0-9]{32}$/.test(token || '');
+  }
+
+  let OWNER = (() => {
+    const stored = storedOwnerToken();
+    return isSignedOwnerToken(stored) ? stored : null;
+  })();
+
+  async function ensureOwnerToken() {
+    if (OWNER) return OWNER;
+    try {
+      const res = await fetch('/api/owner', { headers: { Accept: 'application/json' } });
+      const data = await res.json().catch(() => null);
+      const token = data && data.owner_token;
+      if (isSignedOwnerToken(token)) {
+        OWNER = token;
+        try { localStorage.setItem(OWNER_KEY, token); } catch { /* ephemeral */ }
+        return token;
+      }
+    } catch { /* network error — fall back to any legacy token for reads */ }
+    // Legacy fallback: a previously minted token still lists old watches, but
+    // the server will refuse it for new watches (OWNER_REQUIRED → re-ask).
+    const legacy = storedOwnerToken();
+    if (/^[a-f0-9]{32,64}$/i.test(legacy || '')) return legacy;
+    return null;
+  }
 
   /* The per-watch management token is returned exactly once, when the watch is
      created. It is kept per monitor id so this browser can read, re-check and
@@ -184,6 +203,7 @@
     let res;
     try {
       const headers = Object.assign({ 'Accept': 'application/json' }, body ? { 'Content-Type': 'application/json' } : null);
+      if (!OWNER) await ensureOwnerToken();
       if (OWNER) headers['X-TinyVerify-Owner'] = OWNER;
       if (watchToken) headers['X-TinyVerify-Watch-Token'] = watchToken;
       res = await fetch(path, {
@@ -530,6 +550,9 @@
     if (Number(record.total_found) > 1) {
       banner.appendChild(el('span', 'count-badge',
         `${record.total_found} records at this registry; one is shown`));
+    } else if (record.total_display) {
+      banner.appendChild(el('span', 'count-badge',
+        `${record.total_display} records at this registry; only the returned page was checked`));
     }
     const cached = cachedNote(record);
     if (cached) banner.appendChild(cached);
@@ -654,6 +677,15 @@
     if (cand.registry_name) meta.appendChild(document.createTextNode(` · ${cand.registry_name}`));
     if (cand.jurisdiction) meta.appendChild(document.createTextNode(` · ${cand.jurisdiction}`));
     card.appendChild(meta);
+    const place = [cand.city, cand.state].filter(Boolean).join(', ');
+    const extra = cand.extra || {};
+    const details = [];
+    if (place) details.push(place);
+    if (extra.credential) details.push(extra.credential);
+    if (extra.primary_taxonomy) details.push(extra.primary_taxonomy);
+    if (cand.joined_date) details.push(`Enumerated ${fmtDateOnly(cand.joined_date) || cand.joined_date}`);
+    if (typeof cand.confidence === 'number') details.push(`Name similarity ${Math.round(cand.confidence * 100)}%`);
+    if (details.length) card.appendChild(el('div', 'card-meta', details.join(' · ')));
     if (cand.source_url) card.appendChild(sourceAnchor(cand.source_url, 'Verify at the source', 'card-link'));
     const btn = el('button', 'btn-outline', 'Verify this record', { type: 'button' });
     btn.addEventListener('click', () => {
@@ -769,7 +801,10 @@
   function renderMultipleResult(payload) {
     const body = el('div', 'result-record');
     body.appendChild(el('p', 'no-match-lede',
-      'The registries returned several possible records. Identify the right one — we never pick for you.'));
+      'The registries returned several possible records. Identify the right one — we never pick for you.'
+      + (payload.total_display
+        ? ` The registry page returned ${payload.total_display} records; only that page was checked.`
+        : '')));
     const wrap = el('div', 'candidates');
     for (const cand of payload.candidates || []) wrap.appendChild(candidateCard(cand));
     if (!(payload.candidates || []).length && (payload.results || []).length) {

@@ -48,6 +48,7 @@ node cli.js check mon_xxxxxxxxxxxx
 | `contractor` | `US-CA` | [California CSLB](https://www.cslb.ca.gov) | licence status, number, issue/expiry dates, classifications, bond, workers' comp, complaint disclosure and arbitration records |
 | `health` | `US` | [US NPPES NPI Registry](https://npiregistry.cms.hhs.gov) | enrolment status, NPI, provider name, taxonomy, declared state licence; optional state/city/taxonomy filters |
 | `health` | `US-FL` | [Florida MQA](https://mqa-internet.doh.state.fl.us/MQASearchServices/HealthCareProviders) | licence status, number, profession, expiry, issue date, discipline and public-complaint flags |
+| `health` | `US-TX` | [Texas Medical Board](https://profile.tmb.state.tx.us) | licence status, number, expiry date, Board actions and disciplinary flags |
 
 `health / US-FL` is a **cross-registry** check: TinyVerify queries the federal NPI registry and the Florida medical board together, keeps both records, and prefers the state board record because it carries expiry and discipline. `health / US` with `"state": "FL"` does the same.
 

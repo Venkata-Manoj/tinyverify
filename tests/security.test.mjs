@@ -1,8 +1,15 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { cacheSize, cached } from '../lib/cache.js';
-import { ownerHashFromRequest, ownerHashFromToken } from '../lib/owner.js';
+import {
+  issueOwnerToken,
+  isLegacyOwnerToken,
+  isSignedOwnerToken,
+  ownerHashFromRequest,
+  ownerHashFromToken,
+} from '../lib/owner.js';
 import { clientIp, rateLimit, resetRateLimits } from '../lib/ratelimit.js';
+import { consumeDailyCap, resetDailyCaps } from '../lib/costcap.js';
 import { claimReplay, releaseReplay } from '../lib/store.js';
 
 const previousTrustProxy = process.env.TRUST_PROXY;
@@ -77,15 +84,60 @@ test('a KV outage falls back to the in-memory limiter', async () => {
   }
 });
 
-test('owner tokens are hashed and malformed tokens are rejected', () => {
-  const token = 'a'.repeat(32);
-  const req = { headers: { 'x-tinyverify-owner': token } };
-  const hash = ownerHashFromRequest(req);
+test('server-issued owner tokens are signed, verifiable and hashed', () => {
+  const token = issueOwnerToken();
+  assert.equal(isSignedOwnerToken(token), true);
+  assert.equal(isLegacyOwnerToken(token), false);
+  const hash = ownerHashFromToken(token);
   assert.match(hash, /^[a-f0-9]{64}$/);
-  assert.equal(hash, ownerHashFromToken(token));
+  assert.equal(ownerHashFromRequest({ headers: { 'x-tinyverify-owner': token } }), hash);
+  // A tampered signature must not validate.
+  const tampered = token.slice(0, -1) + (token.at(-1) === 'a' ? 'b' : 'a');
+  assert.equal(isSignedOwnerToken(tampered), false);
+  // A forged browser-minted token is legacy-shaped, not signed.
+  const forged = 'a'.repeat(32);
+  assert.equal(isLegacyOwnerToken(forged), true);
+  assert.equal(isSignedOwnerToken(forged), false);
+  // Malformed input is rejected here too.
   assert.equal(ownerHashFromRequest({ headers: {} }), null);
   assert.equal(ownerHashFromRequest({ headers: { 'x-tinyverify-owner': 'not a token' } }), null);
-  assert.equal(ownerHashFromRequest({ headers: { 'x-tinyverify-owner': token.slice(0, 16) } }), null);
+});
+
+test('legacy owner tokens still hash for read access but are not signed', () => {
+  const token = 'b'.repeat(32);
+  assert.equal(isLegacyOwnerToken(token), true);
+  assert.equal(ownerHashFromToken(token).length, 64);
+  assert.equal(ownerHashFromRequest({ headers: { 'x-tinyverify-owner': token } }).length, 64);
+});
+
+test('rate limiter keys separately by owner hash when present', async () => {
+  resetRateLimits();
+  const ownerA = 'a'.repeat(64);
+  const ownerB = 'b'.repeat(64);
+  const req = { headers: { 'x-real-ip': '203.0.113.50' } };
+  assert.equal((await rateLimit(req, 'verify:owner', { limit: 1, windowSeconds: 60, ownerHash: ownerA })).allowed, true);
+  assert.equal((await rateLimit(req, 'verify:owner', { limit: 1, windowSeconds: 60, ownerHash: ownerA })).allowed, false);
+  // A different owner on the same IP has its own bucket.
+  assert.equal((await rateLimit(req, 'verify:owner', { limit: 1, windowSeconds: 60, ownerHash: ownerB })).allowed, true);
+});
+
+test('daily cost cap blocks over-limit Agent and Monitor work', async () => {
+  resetDailyCaps();
+  const first = await consumeDailyCap('agent', { limit: 2 });
+  assert.equal(first.allowed, true);
+  const second = await consumeDailyCap('agent', { limit: 2 });
+  assert.equal(second.allowed, true);
+  assert.equal(second.remaining, 0);
+  const blocked = await consumeDailyCap('agent', { limit: 2 });
+  assert.equal(blocked.allowed, false);
+  assert.equal(blocked.limit, 2);
+  assert.ok(blocked.retryAfter >= 1);
+  // Monitor allowance is independent.
+  assert.equal((await consumeDailyCap('monitor', { limit: 1 })).allowed, true);
+  assert.equal((await consumeDailyCap('monitor', { limit: 1 })).allowed, false);
+  // A zero limit disables the cap (tests recreating unlimited instances).
+  assert.equal((await consumeDailyCap('agent', { limit: 0 })).allowed, true);
+  resetDailyCaps();
 });
 
 test('cache never grows past its entry cap', async () => {

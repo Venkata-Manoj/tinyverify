@@ -40,14 +40,15 @@ test('nameSimilarity and classifyMatch are conservative', () => {
   assert.equal(classifyMatch('John Smith', 'JOHNATHAN SMITH'), 'no_match');
 });
 
-test('normalizeStatus maps registry wording into the eight-value vocabulary', () => {
+test('normalizeStatus maps registry wording into the shared vocabulary', () => {
   assert.equal(normalizeStatus('Active').status, 'active');
   assert.equal(normalizeStatus('This license is revoked and not able to contract at this time.').status, 'revoked');
   assert.equal(normalizeStatus('Suspended pending hearing').status, 'suspended');
   assert.equal(normalizeStatus('Dissolved').status, 'dissolved');
   assert.equal(normalizeStatus('Struck off').status, 'dissolved');
   assert.equal(normalizeStatus('Liquidation').status, 'in_liquidation');
-  assert.equal(normalizeStatus('Cancelled').status, 'inactive');
+  assert.equal(normalizeStatus('Cancelled').status, 'cancelled');
+  assert.equal(normalizeStatus('Cancelled from 14 Oct 2016').status, 'cancelled');
   assert.equal(normalizeStatus('Null And Void').status, 'inactive');
   assert.equal(normalizeStatus('Delinquent/Active').status, 'expired');
   assert.equal(normalizeStatus('Something new').status, 'unknown');

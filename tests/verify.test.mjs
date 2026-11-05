@@ -115,7 +115,32 @@ test('total_found reports the largest single-registry count, never a sum', async
 test('a missing registry count stays null instead of becoming zero', async () => {
   const result = await verify(query, { registries: [registry({ outcome: 'match', record: record() })] });
   assert.equal(result.total_found, null);
+  assert.equal(result.total_capped, false);
+  assert.equal(result.total_display, null);
   assert.equal(result.primary.total_found, null);
+});
+
+test('a capped page is reported as a lower bound, never as the full count', async () => {
+  const fake = registry({
+    outcome: 'multiple',
+    source_url: 'https://registry.example/search',
+    total_found: null,
+    total_capped: true,
+    total_capped_at: 200,
+    total_display: '200+ (capped)',
+    candidates: [{
+      name: 'JOHN SMITH',
+      licence_number: '1234567893',
+      status: 'active',
+      source_url: 'https://registry.example/provider/1234567893',
+    }],
+    detail: '200+ (capped) records matched',
+  });
+  const result = await verify({ subject: 'John Smith', licence_type: 'business', jurisdiction: 'UK' }, { registries: [fake] });
+  assert.equal(result.total_found, null);
+  assert.equal(result.total_capped, true);
+  assert.equal(result.total_display, '200+ (capped)');
+  assert.equal(result.searched[0].total_capped, true);
 });
 
 test('one name/number mismatch forces the overall quality to mismatch', async () => {

@@ -262,6 +262,7 @@ main { padding: 40px 24px 56px; position: relative; }
 .pill-dissolved { background: var(--p-dissolved-bg); color: var(--p-dissolved-fg); }
 .pill-in_liquidation { background: var(--p-liquid-bg); color: var(--p-liquid-fg); }
 .pill-inactive { background: var(--p-inactive-bg); color: var(--p-inactive-fg); }
+.pill-cancelled { background: var(--p-inactive-bg); color: var(--p-inactive-fg); }
 .pill-unknown { background: var(--p-unknown-bg); color: var(--p-unknown-fg); }
 .pill .pill-tick, .pill .pill-x { flex: none; }
 

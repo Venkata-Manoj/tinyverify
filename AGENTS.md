@@ -41,6 +41,7 @@ TinyVerify checks a person, business or contractor against live official registr
 | `npi-us` | health | US | TinyFish Fetch (JSON API) |
 | `abn-au` | business | AU | Direct HTTPS (ABN Lookup) |
 | `mqa-fl` | health | US-FL | Direct HTTPS (ASP.NET form + detail page) |
+| `tmb-fl` | health | US-TX | TinyFish Search + Fetch (Texas Medical Board) |
 
 ## Commands
 
