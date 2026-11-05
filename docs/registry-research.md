@@ -9,7 +9,9 @@ What was probed before writing each adapter, what worked, and what was rejected.
 | NZ Companies Office | plain HTTPS | **200, server-rendered** | **Yes** (`nz-companies`) |
 | UK Companies House | TinyFish Search + Fetch | 200, stable record pages | **Yes** (`companies-house-uk`) |
 | California CSLB | TinyFish Search + HTTPS + Agent | 200; name form needs the Agent | **Yes** (`cslb-ca`) |
-| US NPPES NPI | TinyFish Fetch (JSON) | 200; Node fetch fails `EAI_AGAIN` | **Yes** (`npi-us`) |
+| US NPPES NPI | TinyFish Fetch (JSON) | 200; Node fetch can fail `EAI_AGAIN` | **Yes** (`npi-us`) |
+| Australian Business Register | plain HTTPS | **200, server-rendered; POST search → 302 results** | **Yes** (`abn-au`) |
+| Florida MQA | plain HTTPS | **200; exact number → 302 detail page** | **Yes** (`mqa-fl`) |
 | UK HCPC | HTTPS + Fetch + Agent | Cloudflare interstitial / `bot_blocked` | No |
 | Australia AHPRA | HTTPS + Fetch + Agent | F5 challenge; stealth Agent works but ambiguous | No |
 | UK GMC | HTTPS + Fetch + Agent | Client-rendered search and record; Agent could not drive it | No |
@@ -48,6 +50,48 @@ Previous names: TASMAN EMPIRE AIRWAYS LIMITED (from 26 Apr 1940 to 01 Apr 1965)
 2. **Ambiguity is severe.** `"air new zealand"` returns 307 results because of subsidiaries and former names. The register recommends searching by company number or NZBN. The adapter returns plausible candidates instead of picking one.
 3. **No expiry date** exists for a company. The record exposes the annual-return month and last-filed date instead.
 4. **No disciplinary data** on the company page. Banned-director decisions live on a separate register.
+
+---
+
+## Australian Business Register — verified end to end
+
+**Official site:** `https://abr.business.gov.au`
+
+### Evidence
+
+- Search form: `GET /Search` → **200**, server-rendered ASP.NET form.
+- Search POST: `POST /Search/Run` with `SearchParameters.SearchText=Telstra` and `SearchParameters.AllNames=true` → **302** to `/Search/ResultsActive?SearchText=Telstra` → **200**, 146 active matches.
+- Record page: `GET /ABN/View?id=33051775556` → **200**, legal name `TELSTRA CORPORATION LIMITED`, `ABN status: Active from 01 Nov 1999`, entity type `Australian Public Company`.
+- ABN `33051775557` fails the official checksum and is rejected before the fetch.
+
+### Traps found
+
+1. **Search is a POST, not a query string.** A plain GET to `/Search/ResultsActive` is not the same as submitting the form; the adapter posts `SearchParameters.*`.
+2. **Names live in multiple tables.** The legal name is in `itemprop="legalName"`; business and trading names are in separate `<caption>` tables. Matching against all of them avoids false negatives for trading names.
+3. **Cancelled ABNs are not in the active results.** A name search therefore cannot prove an ABN was never registered; the record says to add the ABN for a cancelled check.
+4. **No expiry date exists.** The register publishes status and its effective date only.
+
+---
+
+## Florida MQA — verified end to end
+
+**Official site:** `https://mqa-internet.doh.state.fl.us/MQASearchServices/HealthCareProviders`
+
+### Evidence
+
+- Search form: `GET /HealthCareProviders` → **200**, ASP.NET MVC form with `__RequestVerificationToken`, `SearchDto.Board`, `SearchDto.Profession`, `SearchDto.LicenseNumber`, `SearchDto.LastName`, `SearchDto.FirstName`, `SearchDto.LicenseStatus`.
+- Name search: `LastName=Smith`, `FirstName=John`, `Profession=1501` → **200**, `Search Results Total: 7`, first row `ME182088 Smith, John Horatio Medical Doctor ATLANTA Clear/Active`.
+- Number search: `SearchDto.LicenseNumber=ME182088` → **302** `Location: /MQASearchServices/HealthcareProviders/LicenseVerification?LicInd=182095&Procde=1501`.
+- Detail page → **200**, `License Number: ME182088`, status `Clear/Active`, expiry `01/31/2028`, issue date `06/01/2026`, `Discipline on File: No`.
+- NPI `1295346773` and MQA `ME182088` are different identifiers; the cross-registry check queries both and shows the NPI `no_match` rather than hiding it.
+
+### Traps found
+
+1. **An exact number does not return a table.** It returns a 302 to the detail page. A parser that waits for `Search Results Total` sees zero rows and falsely reports `no_match`. The adapter uses `redirect: 'manual'`, recognises the `LicenseVerification` Location, follows it, and checks the detail page's number against the requested one.
+2. **The redirect spells `Procde`, not `ProCde`.** The detail URL builder normalises both spellings.
+3. **The search form is stateful.** The anti-forgery token and session cookie from the GET must be sent with the POST, and the detail/enforcement requests reuse the cookie.
+4. **Discipline is a second request.** The detail page only carries flags; `LoadEnforcementActionsTab` carries the actions. The adapter fetches it only when a flag is positive.
+5. **`Delinquent` is not active.** It maps to `expired`; the native wording stays in `status_detail`.
 
 ---
 

@@ -1,0 +1,234 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tinyverify.vercel.app/docs/record.schema.json",
+  "title": "TinyVerify record",
+  "description": "One record read from an official registry. Every record has a source and a checked-at timestamp; status is the shared vocabulary, status_detail keeps the registry's own wording.",
+  "type": "object",
+  "required": [
+    "subject",
+    "licence_type",
+    "jurisdiction",
+    "status",
+    "status_bounty",
+    "licence_number",
+    "expiry_date",
+    "disciplinary_actions",
+    "disciplinary_records",
+    "source_name",
+    "source_url",
+    "checked_at",
+    "match_quality",
+    "name_number_mismatch",
+    "registry_id",
+    "fields",
+    "notes"
+  ],
+  "properties": {
+    "subject": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "The name as entered by the caller (or 'registration <number>' for a number-only lookup)."
+    },
+    "licence_type": {
+      "type": "string",
+      "enum": ["business", "contractor", "health"]
+    },
+    "jurisdiction": {
+      "type": "string",
+      "examples": ["UK", "NZ", "AU", "US", "US-CA", "US-FL"]
+    },
+    "status": {
+      "$ref": "#/$defs/status"
+    },
+    "status_bounty": {
+      "$ref": "#/$defs/statusBounty"
+    },
+    "licence_number": {
+      "type": ["string", "null"],
+      "description": "Registration, licence, NPI or ABN number. Null only when the registry has no such concept."
+    },
+    "expiry_date": {
+      "type": ["string", "null"],
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "description": "YYYY-MM-DD, or null when the registry does not publish an expiry date. Never inferred."
+    },
+    "disciplinary_actions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "Human-readable actions. ['none found'] when a disciplinary section exists but is empty; ['not published by this registry'] when the source has no such concept."
+    },
+    "disciplinary_records": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/disciplinaryRecord" }
+    },
+    "source_name": {
+      "type": "string",
+      "minLength": 1,
+      "examples": ["UK Companies House", "California CSLB", "Florida Department of Health (MQA)"]
+    },
+    "source_url": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https?://"
+    },
+    "checked_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO timestamp of the live read. A cached response keeps the original value."
+    },
+    "match_quality": {
+      "$ref": "#/$defs/matchQuality"
+    },
+    "name_number_mismatch": {
+      "type": "boolean",
+      "description": "True when a supplied name and registration number do not describe the same record."
+    },
+    "registry_id": {
+      "type": ["string", "null"],
+      "enum": [
+        "companies-house-uk",
+        "nz-companies",
+        "abn-au",
+        "cslb-ca",
+        "npi-us",
+        "mqa-fl",
+        null
+      ]
+    },
+    "registry_name": {
+      "type": ["string", "null"]
+    },
+    "status_detail": {
+      "type": ["string", "null"],
+      "description": "The registry's own status wording, unchanged."
+    },
+    "matched_name": {
+      "type": ["string", "null"],
+      "description": "The official name in the register."
+    },
+    "variant_used": {
+      "type": ["string", "null"],
+      "description": "Set when a name variant other than the entered name produced the match."
+    },
+    "confidence": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "total_found": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "The registry's true result count, not the number of rows returned."
+    },
+    "cached": {
+      "type": "boolean"
+    },
+    "cache_age_seconds": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "fields": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Registry-specific fields (company type, SIC codes, classifications, taxonomy, ABN entity type, …)."
+    },
+    "notes": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "expired",
+        "suspended",
+        "revoked",
+        "dissolved",
+        "in_liquidation",
+        "inactive",
+        "unknown"
+      ]
+    },
+    "statusBounty": {
+      "type": "string",
+      "enum": ["active", "expired", "suspended", "unknown"]
+    },
+    "matchQuality": {
+      "type": "string",
+      "enum": ["exact", "close", "mismatch", "multiple", "no_match", "unsupported"]
+    },
+    "disciplinaryRecord": {
+      "type": "object",
+      "required": ["type", "date", "description", "status", "source_url"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "examples": ["arbitration", "board enforcement action"]
+        },
+        "date": {
+          "type": ["string", "null"],
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "description": {
+          "type": ["string", "null"]
+        },
+        "status": {
+          "type": ["string", "null"]
+        },
+        "source_url": {
+          "type": ["string", "null"],
+          "format": "uri"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "examples": [
+    {
+      "subject": "DONE RIGHT DISCOUNT FLOORING",
+      "licence_type": "contractor",
+      "jurisdiction": "US-CA",
+      "status": "revoked",
+      "status_bounty": "suspended",
+      "licence_number": "738180",
+      "expiry_date": "2017-05-28",
+      "disciplinary_actions": [
+        "Arbitration A S 2016 000293 — NON-COMPLIANCE - LICENSE REVOKED PER 7085.6 · 2017-05-28 · NON-COMPLIANCE - LICENSE REVOKED PER 7085.6"
+      ],
+      "disciplinary_records": [
+        {
+          "type": "arbitration",
+          "date": "2017-05-28",
+          "description": "Arbitration A S 2016 000293 — NON-COMPLIANCE - LICENSE REVOKED PER 7085.6",
+          "status": "NON-COMPLIANCE - LICENSE REVOKED PER 7085.6",
+          "source_url": "https://www.cslb.ca.gov/OnlineServices/CheckLicenseII/ComplaintDisclosure.aspx?LicType=LIC&LicNum=738180"
+        }
+      ],
+      "source_name": "California CSLB",
+      "source_url": "https://www.cslb.ca.gov/738180",
+      "checked_at": "2026-11-05T05:26:28.639Z",
+      "match_quality": "exact",
+      "name_number_mismatch": false,
+      "registry_id": "cslb-ca",
+      "registry_name": "California CSLB",
+      "status_detail": "Revoked",
+      "matched_name": "DONE RIGHT DISCOUNT FLOORING",
+      "confidence": 1,
+      "total_found": 1,
+      "cached": false,
+      "cache_age_seconds": 0,
+      "fields": {
+        "business_name": "DONE RIGHT DISCOUNT FLOORING",
+        "expire_date": "2017-05-28",
+        "complaint_disclosure": "on file"
+      },
+      "notes": [
+        "CSLB is the California state contractor licensing board."
+      ]
+    }
+  ]
+}

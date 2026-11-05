@@ -1,0 +1,807 @@
+openapi: 3.1.0
+info:
+  title: TinyVerify API
+  version: 0.2.0
+  description: |
+    Verify a person, business or contractor against live official registries.
+    Every returned record carries `source_url` and `checked_at`, and every
+    status comes from the register read during the request (or a short-lived
+    cache created from such a read).
+
+    Watches are scoped by a browser owner token and, for a single watch, by a
+    per-watch management token returned once at creation.
+  license:
+    name: MIT
+servers:
+  - url: https://tinyverify.vercel.app
+    description: Production
+  - url: http://localhost:3000
+    description: Local development
+
+tags:
+  - name: Verify
+  - name: Registries
+  - name: Watches
+  - name: Webhooks
+  - name: System
+
+paths:
+  /api/health:
+    get:
+      tags: [System]
+      summary: Service health
+      responses:
+        '200':
+          description: Service metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, name, version, time, api_key_configured, demo, storage, registries]
+                properties:
+                  ok: { type: boolean, const: true }
+                  name: { type: string, const: TinyVerify }
+                  version: { type: string, example: 0.2.0 }
+                  time: { type: string, format: date-time }
+                  api_key_configured: { type: boolean }
+                  demo: { type: boolean }
+                  storage: { type: string, enum: [file, redis] }
+                  registries:
+                    type: array
+                    items: { type: string }
+
+  /api/registries:
+    get:
+      tags: [Registries]
+      summary: Registry metadata and supported combinations
+      responses:
+        '200':
+          description: Registry catalogue
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, registries, types, jurisdictions, combinations]
+                properties:
+                  ok: { type: boolean, const: true }
+                  registries:
+                    type: array
+                    items: { $ref: '#/components/schemas/Registry' }
+                  types:
+                    type: array
+                    items: { type: string }
+                  jurisdictions:
+                    type: array
+                    items: { type: string }
+                  combinations:
+                    type: array
+                    items: { $ref: '#/components/schemas/Combination' }
+
+  /api/coverage:
+    get:
+      tags: [Registries]
+      summary: Coverage matrix only
+      responses:
+        '200':
+          description: Supported type/jurisdiction combinations
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, types, jurisdictions, combinations]
+                properties:
+                  ok: { type: boolean, const: true }
+                  types:
+                    type: array
+                    items: { type: string }
+                  jurisdictions:
+                    type: array
+                    items: { type: string }
+                  combinations:
+                    type: array
+                    items: { $ref: '#/components/schemas/Combination' }
+
+  /api/verify:
+    post:
+      tags: [Verify]
+      summary: Verify a record
+      description: |
+        Reads the live registry (or a 10-minute cache created from one). A
+        `number` without a `subject` is an exact identity lookup. A `number`
+        with a subject is checked for a name/number mismatch.
+
+        `refresh: true` bypasses the cache only for a caller presenting
+        `X-TinyVerify-Owner` or the admin key.
+      parameters:
+        - $ref: '#/components/parameters/OwnerToken'
+        - $ref: '#/components/parameters/AdminKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VerifyRequest' }
+            examples:
+              uk:
+                summary: UK company
+                value:
+                  subject: Tesco PLC
+                  licence_type: business
+                  jurisdiction: UK
+              florida:
+                summary: Florida physician
+                value:
+                  subject: JOHN HORATIO SMITH II
+                  licence_type: health
+                  jurisdiction: US-FL
+                  number: ME182088
+      responses:
+        '200':
+          description: Verification result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VerifyResponse' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '502':
+          $ref: '#/components/responses/RegistryUnavailable'
+
+  /api/monitors:
+    get:
+      tags: [Watches]
+      summary: List the caller's watches
+      description: Returns an empty list when no owner token is supplied, unless a valid admin key is presented.
+      parameters:
+        - $ref: '#/components/parameters/OwnerToken'
+        - $ref: '#/components/parameters/AdminKey'
+      responses:
+        '200':
+          description: Watches visible to the caller
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, monitors]
+                properties:
+                  ok: { type: boolean, const: true }
+                  monitors:
+                    type: array
+                    items: { $ref: '#/components/schemas/MonitorSummary' }
+    post:
+      tags: [Watches]
+      summary: Create a watch
+      description: Verifies the record live, stores a baseline snapshot, and creates a TinyFish Monitor. The returned `manage_token` is shown once and cannot be retrieved again.
+      parameters:
+        - $ref: '#/components/parameters/OwnerToken'
+        - $ref: '#/components/parameters/AdminKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VerifyRequest' }
+      responses:
+        '201':
+          description: Watch created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, monitor, record, manage_token]
+                properties:
+                  ok: { type: boolean, const: true }
+                  monitor: { $ref: '#/components/schemas/MonitorSummary' }
+                  record: { $ref: '#/components/schemas/Record' }
+                  manage_token:
+                    type: string
+                    description: Shown once. Send as `X-TinyVerify-Watch-Token`.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/NoConfirmedRecord'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /api/monitors/{id}:
+    parameters:
+      - $ref: '#/components/parameters/MonitorId'
+    get:
+      tags: [Watches]
+      summary: Watch and its change events
+      parameters:
+        - $ref: '#/components/parameters/WatchToken'
+        - $ref: '#/components/parameters/AdminKey'
+      responses:
+        '200':
+          description: Watch detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WatchDetail' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Watches]
+      summary: Delete a watch and its TinyFish Monitor
+      parameters:
+        - $ref: '#/components/parameters/WatchToken'
+        - $ref: '#/components/parameters/AdminKey'
+      responses:
+        '200':
+          description: Watch deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, deleted, id]
+                properties:
+                  ok: { type: boolean, const: true }
+                  deleted: { type: boolean, const: true }
+                  id: { type: string }
+                  tinyfish_deleted: { type: boolean }
+                  tinyfish_error: { type: [string, 'null'] }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/monitors/{id}/events:
+    parameters:
+      - $ref: '#/components/parameters/MonitorId'
+    get:
+      tags: [Watches]
+      summary: Change events only
+      parameters:
+        - $ref: '#/components/parameters/WatchToken'
+        - $ref: '#/components/parameters/AdminKey'
+      responses:
+        '200':
+          description: Watch and events
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WatchDetail' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/monitors/{id}/check:
+    parameters:
+      - $ref: '#/components/parameters/MonitorId'
+    post:
+      tags: [Watches]
+      summary: Re-read the source now and diff
+      description: "Runs the full verification pipeline with `refresh: true`. A registry outage or parse miss keeps the previous snapshot and returns `event: null` with `ok: false`."
+      parameters:
+        - $ref: '#/components/parameters/WatchToken'
+        - $ref: '#/components/parameters/AdminKey'
+      responses:
+        '200':
+          description: Check outcome
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, event, monitor, note]
+                properties:
+                  ok: { type: boolean, const: true }
+                  event:
+                    oneOf:
+                      - { $ref: '#/components/schemas/ChangeEvent' }
+                      - { type: 'null' }
+                  monitor: { $ref: '#/components/schemas/MonitorSummary' }
+                  note: { type: string }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /api/monitors/{id}/simulate:
+    parameters:
+      - $ref: '#/components/parameters/MonitorId'
+    post:
+      tags: [Watches]
+      summary: Append a labelled demo event
+      description: Available only when `TINYVERIFY_DEMO=1`. The live snapshot is never modified.
+      parameters:
+        - $ref: '#/components/parameters/WatchToken'
+        - $ref: '#/components/parameters/AdminKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status: { $ref: '#/components/schemas/Status' }
+                status_detail: { type: string, maxLength: 200 }
+                expiry_date: { type: [string, 'null'], maxLength: 32 }
+                disciplinary_actions:
+                  oneOf:
+                    - { type: array, maxItems: 10, items: { type: string, maxLength: 300 } }
+                    - { type: string, maxLength: 300 }
+      responses:
+        '200':
+          description: Simulated event appended
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, event, monitor, note]
+                properties:
+                  ok: { type: boolean, const: true }
+                  event:
+                    oneOf:
+                      - { $ref: '#/components/schemas/ChangeEvent' }
+                      - { type: 'null' }
+                  monitor: { $ref: '#/components/schemas/MonitorSummary' }
+                  note: { type: string }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /api/webhooks/tinyfish:
+    post:
+      tags: [Webhooks]
+      summary: TinyFish Monitor callback
+      description: |
+        Requires a shared secret in production. Accepted proof is `?token=<secret>`
+        or HMAC-SHA256 of `<timestamp>.<raw body>` in `X-TinyFish-Signature`
+        with `X-TinyFish-Timestamp` within ±300 seconds. Payload hashes are
+        remembered for five minutes so replays are ignored. The payload is never
+        trusted as the source of truth: the watch is re-read and diffed.
+      parameters:
+        - name: token
+          in: query
+          required: false
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              properties:
+                monitor_id: { type: string }
+      responses:
+        '200':
+          description: Webhook handled or deliberately ignored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, const: true }
+                  ignored: { type: boolean }
+                  reason: { type: string }
+                  monitor_id: { type: string }
+                  event:
+                    oneOf:
+                      - { $ref: '#/components/schemas/ChangeEvent' }
+                      - { type: 'null' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          description: Webhook secret is not configured in production
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+components:
+  parameters:
+    OwnerToken:
+      name: X-TinyVerify-Owner
+      in: header
+      required: false
+      description: Random browser owner token (32 hex characters). The server stores only its SHA-256 hash.
+      schema: { type: string, pattern: '^[a-f0-9]{32}$' }
+    WatchToken:
+      name: X-TinyVerify-Watch-Token
+      in: header
+      required: false
+      description: Per-watch management token returned once at creation. Required for new watches.
+      schema: { type: string }
+    AdminKey:
+      name: X-TinyVerify-Admin
+      in: header
+      required: false
+      description: Admin key configured in `TINYVERIFY_ADMIN_KEY`.
+      schema: { type: string }
+    MonitorId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, pattern: '^mon_[a-f0-9]{12}$' }
+
+  responses:
+    BadRequest:
+      description: Invalid input
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Missing or invalid credential
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Watch not found, or credential does not match
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    UnsupportedMediaType:
+      description: Content-Type was not JSON
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RateLimited:
+      description: Too many requests
+      headers:
+        Retry-After:
+          schema: { type: integer }
+        X-RateLimit-Limit:
+          schema: { type: integer }
+        X-RateLimit-Remaining:
+          schema: { type: integer }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RegistryUnavailable:
+      description: Every registry for the combination failed; nothing was inferred
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NoConfirmedRecord:
+      description: The watch could not be created because no single record was confirmed
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Status:
+      type: string
+      enum: [active, expired, suspended, revoked, dissolved, in_liquidation, inactive, unknown]
+    StatusBounty:
+      type: string
+      enum: [active, expired, suspended, unknown]
+    MatchQuality:
+      type: string
+      enum: [exact, close, mismatch, multiple, no_match, unsupported]
+    VerifyRequest:
+      type: object
+      additionalProperties: false
+      required: [licence_type, jurisdiction]
+      properties:
+        subject:
+          type: string
+          maxLength: 200
+          description: Person, business or contractor name. Required unless `number` is supplied.
+        licence_type:
+          type: string
+          enum: [business, contractor, health]
+          description: Common aliases (company, builder, doctor, …) are normalised.
+        jurisdiction:
+          type: string
+          description: UK, NZ, AU, US, US-CA, US-FL and common aliases.
+        number:
+          type: string
+          maxLength: 32
+          description: Registration, licence, NPI or ABN number.
+        state:
+          type: string
+          maxLength: 2
+          description: US state filter for health queries. `FL` adds the Florida MQA board.
+        city:
+          type: string
+          maxLength: 80
+          description: Health queries only.
+        taxonomy:
+          type: string
+          maxLength: 80
+          description: Health specialty/taxonomy filter.
+        refresh:
+          type: boolean
+          description: Bypass the 10-minute cache. Honoured only for an owner or admin caller.
+      anyOf:
+        - required: [subject]
+        - required: [number]
+    VerifyResponse:
+      type: object
+      required: [ok, query, match_quality, primary, results, candidates, near_misses, searched, notes, errors, incomplete, name_number_mismatch, checked_at, duration_ms]
+      properties:
+        ok: { type: boolean, const: true }
+        query:
+          type: object
+          properties:
+            subject: { type: string }
+            licence_type: { type: string }
+            jurisdiction: { type: string }
+            number: { type: [string, 'null'] }
+            state: { type: string }
+            city: { type: string }
+            taxonomy: { type: string }
+        match_quality: { $ref: '#/components/schemas/MatchQuality' }
+        conflict:
+          type: boolean
+          description: Present when registries disagree; `primary` is null and each record is kept.
+        primary:
+          oneOf:
+            - { $ref: '#/components/schemas/Record' }
+            - { type: 'null' }
+        results:
+          type: array
+          items: { $ref: '#/components/schemas/Record' }
+        candidates:
+          type: array
+          items: { $ref: '#/components/schemas/Candidate' }
+        near_misses:
+          type: array
+          items: { $ref: '#/components/schemas/Candidate' }
+        suggestions:
+          type: array
+          items:
+            type: object
+            properties:
+              value: { type: string }
+              reason: { type: string }
+        searched:
+          type: array
+          items: { $ref: '#/components/schemas/RegistryOutcome' }
+        notes:
+          type: array
+          items: { type: string }
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              registry_id: { type: string }
+              registry_name: { type: string }
+              message: { type: string }
+        incomplete: { type: boolean }
+        total_found:
+          type: [integer, 'null']
+          description: Largest single-registry result count, never a sum across registries.
+        name_number_mismatch: { type: boolean }
+        name_number_check:
+          oneOf:
+            - $ref: '#/components/schemas/NameNumberCheck'
+            - { type: 'null' }
+        duration_ms: { type: integer }
+        checked_at: { type: string, format: date-time }
+        supported:
+          $ref: '#/components/schemas/Coverage'
+    Record:
+      type: object
+      required:
+        - subject
+        - licence_type
+        - jurisdiction
+        - status
+        - status_bounty
+        - licence_number
+        - expiry_date
+        - disciplinary_actions
+        - disciplinary_records
+        - source_name
+        - source_url
+        - checked_at
+        - match_quality
+        - name_number_mismatch
+        - registry_id
+        - fields
+        - notes
+      properties:
+        subject: { type: string }
+        licence_type: { type: string }
+        jurisdiction: { type: string }
+        status: { $ref: '#/components/schemas/Status' }
+        status_bounty: { $ref: '#/components/schemas/StatusBounty' }
+        licence_number: { type: [string, 'null'] }
+        expiry_date:
+          type: [string, 'null']
+          pattern: '^\\d{4}-\\d{2}-\\d{2}$'
+        disciplinary_actions:
+          type: array
+          items: { type: string }
+        disciplinary_records:
+          type: array
+          items: { $ref: '#/components/schemas/DisciplinaryRecord' }
+        source_name: { type: string }
+        source_url: { type: string, format: uri }
+        checked_at: { type: string, format: date-time }
+        match_quality: { $ref: '#/components/schemas/MatchQuality' }
+        name_number_mismatch: { type: boolean }
+        registry_id: { type: [string, 'null'] }
+        registry_name: { type: [string, 'null'] }
+        status_detail: { type: [string, 'null'] }
+        matched_name: { type: [string, 'null'] }
+        variant_used: { type: [string, 'null'] }
+        confidence: { type: [number, 'null'], minimum: 0, maximum: 1 }
+        total_found: { type: [integer, 'null'] }
+        cached: { type: boolean }
+        cache_age_seconds: { type: integer }
+        fields: { type: object, additionalProperties: true }
+        notes:
+          type: array
+          items: { type: string }
+    DisciplinaryRecord:
+      type: object
+      required: [type, date, description, status, source_url]
+      properties:
+        type: { type: string }
+        date: { type: [string, 'null'] }
+        description: { type: [string, 'null'] }
+        status: { type: [string, 'null'] }
+        source_url: { type: [string, 'null'], format: uri }
+    Candidate:
+      type: object
+      properties:
+        name: { type: string }
+        licence_number: { type: [string, 'null'] }
+        jurisdiction: { type: string }
+        status: { $ref: '#/components/schemas/Status' }
+        status_detail: { type: [string, 'null'] }
+        source_url: { type: string, format: uri }
+        source_name: { type: string }
+        registry_id: { type: string }
+        registry_name: { type: string }
+        confidence: { type: number }
+        reason: { type: string }
+        extra: { type: object, additionalProperties: true }
+    RegistryOutcome:
+      type: object
+      required: [registry_id, registry_name, outcome, source_url]
+      properties:
+        registry_id: { type: string }
+        registry_name: { type: string }
+        outcome: { type: string, enum: [match, multiple, no_match, error] }
+        source_url: { type: [string, 'null'], format: uri }
+        detail: { type: [string, 'null'] }
+        total_found: { type: [integer, 'null'] }
+    NameNumberCheck:
+      type: object
+      properties:
+        registry_id: { type: string }
+        provided_name: { type: [string, 'null'] }
+        official_name: { type: string }
+        similarity: { type: number }
+        matched: { type: boolean }
+    Registry:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        kind: { type: string }
+        types:
+          type: array
+          items: { type: string }
+        jurisdictions:
+          type: array
+          items: { type: string }
+        source_url: { type: string, format: uri }
+        description: { type: string }
+        fields:
+          type: array
+          items: { type: string }
+    Combination:
+      type: object
+      properties:
+        licence_type: { type: string }
+        jurisdiction: { type: string }
+        registries:
+          type: array
+          items: { type: string }
+    Coverage:
+      type: object
+      properties:
+        types:
+          type: array
+          items: { type: string }
+        jurisdictions:
+          type: array
+          items: { type: string }
+        combinations:
+          type: array
+          items: { $ref: '#/components/schemas/Combination' }
+    MonitorSummary:
+      type: object
+      required: [id, subject, licence_type, jurisdiction, created_at, updated_at, snapshot]
+      properties:
+        id: { type: string, pattern: '^mon_[a-f0-9]{12}$' }
+        subject: { type: string }
+        licence_type: { type: string }
+        jurisdiction: { type: string }
+        number: { type: [string, 'null'] }
+        registry_id: { type: [string, 'null'] }
+        registry_name: { type: [string, 'null'] }
+        source_name: { type: [string, 'null'] }
+        source_url: { type: [string, 'null'], format: uri }
+        schedule_cron: { type: string }
+        status: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        last_checked_at: { type: [string, 'null'], format: date-time }
+        last_check:
+          oneOf:
+            - type: object
+              properties:
+                ok: { type: boolean }
+                at: { type: string, format: date-time }
+                note: { type: string }
+            - { type: 'null' }
+        last_error: { type: [string, 'null'] }
+        snapshot:
+          type: object
+          properties:
+            status: { $ref: '#/components/schemas/Status' }
+            licence_number: { type: [string, 'null'] }
+            expiry_date: { type: [string, 'null'] }
+            disciplinary_actions:
+              type: array
+              items: { type: string }
+            status_detail: { type: [string, 'null'] }
+        events:
+          type: array
+          items: { $ref: '#/components/schemas/ChangeEvent' }
+        manage_token_required: { type: boolean }
+        event_count: { type: integer }
+        tinyfish_monitor_id: { type: [string, 'null'] }
+        tinyfish_monitor_status: { type: [string, 'null'] }
+        baseline: { type: object, additionalProperties: true }
+        last_tinyfish_run:
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - { type: 'null' }
+    ChangeEvent:
+      type: object
+      required: [id, changed_fields, old, new, checked_at, source_url, summary]
+      properties:
+        id: { type: string, pattern: '^evt_[a-f0-9]{12}$' }
+        changed_fields:
+          type: array
+          items:
+            type: string
+            enum: [status, licence_number, expiry_date, disciplinary_actions, status_detail]
+        old: { type: object, additionalProperties: true }
+        new: { type: object, additionalProperties: true }
+        checked_at: { type: string, format: date-time }
+        source_url: { type: string, format: uri }
+        registry_name: { type: string }
+        summary: { type: string }
+        detected_by: { type: string }
+        simulated:
+          type: boolean
+          description: Present and true only for the demo simulator.
+    WatchDetail:
+      type: object
+      required: [ok, monitor, events]
+      properties:
+        ok: { type: boolean, const: true }
+        monitor: { $ref: '#/components/schemas/MonitorSummary' }
+        events:
+          type: array
+          items: { $ref: '#/components/schemas/ChangeEvent' }
+    Error:
+      type: object
+      required: [ok, error]
+      properties:
+        ok: { type: boolean, const: false }
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details: { type: object, additionalProperties: true }
+        request_id: { type: string }

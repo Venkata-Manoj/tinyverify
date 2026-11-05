@@ -7,9 +7,9 @@ TinyVerify answers a question a hiring manager or compliance team actually has t
 
 > Is this doctor licensed? Is this contractor in good standing? Is this company still registered?
 
-You give a **name**, a **record type** and a **jurisdiction**. TinyVerify reads the **live official registry**, returns a structured record with the **source link** and a **`checked_at` timestamp**, and can **watch that record** so a status change is caught without re-checking by hand.
+You give it a **name**, a **record type** and a **jurisdiction**. TinyVerify reads the **live official registry**, returns a structured record with the **source link** and a **`checked_at` timestamp**, and can **watch that record** so a status change is caught without re-checking by hand.
 
-It never invents a record. If the official source cannot confirm one, the answer is `no_match`. If several records could be the same subject, every candidate is returned and none is auto-selected.
+It never invents a record. If the official source cannot confirm one, the answer is `no_match`. If several records could be the same subject, every candidate is returned and none is auto-selected. If the name and a supplied registration number describe different records, the response is flagged `mismatch` instead of pretending the pair is verified.
 
 ![TinyVerify returning the live NZ Companies Office record for Air New Zealand Limited](docs/screenshot-exact.png)
 
@@ -22,8 +22,10 @@ Open https://tinyverify.vercel.app and press one of the sample chips:
 | Sample | What it proves |
 |---|---|
 | **Tesco PLC** · business · UK | Exact match on the UK company register |
-| **DONE RIGHT DISCOUNT FLOORING** · contractor · US-CA | Revoked California licence with expiry date and complaint disclosure |
+| **DONE RIGHT DISCOUNT FLOORING** · contractor · US-CA | Revoked California licence with expiry and a real complaint disclosure |
 | **Air New Zealand Limited** · business · NZ | New Zealand company with NZBN, registered office and annual-return data |
+| **TELSTRA CORPORATION LIMITED** · business · AU | Australian ABN with GST and entity type |
+| **JOHN HORATIO SMITH II** · health · US-FL | Federal NPI and Florida medical board checked together |
 
 Or verify from the CLI:
 
@@ -40,10 +42,14 @@ node cli.js check mon_xxxxxxxxxxxx
 
 | Record type | Jurisdiction | Official source | What comes back |
 |---|---|---|---|
-| `business` | `UK` | [UK Companies House](https://find-and-update.company-information.service.gov.uk) | status, company number, incorporation date, registered office, SIC codes, filing dates, previous names |
-| `business` | `NZ` | [NZ Companies Office](https://www.companiesoffice.govt.nz) | status, company number, NZBN, entity type, incorporation date, registered office, annual-return data, previous names |
-| `contractor` | `US-CA` | [California CSLB](https://www.cslb.ca.gov) | licence status, licence number, issue/expiry dates, classifications, bond, workers' comp, public complaint disclosure |
-| `health` | `US` | [US NPPES NPI Registry](https://npiregistry.cms.hhs.gov) | enrolment status, NPI, provider name, taxonomy, state licence number |
+| `business` | `UK` | [UK Companies House](https://find-and-update.company-information.service.gov.uk) | status, company number, incorporation, registered office, SIC codes, filing dates, previous names, disqualification-register pointer |
+| `business` | `NZ` | [NZ Companies Office](https://www.companiesoffice.govt.nz) | status, company number, NZBN, entity type, incorporation, registered office, annual-return data, previous names |
+| `business` | `AU` | [Australian Business Register](https://abr.business.gov.au) | ABN status, ABN, entity type, GST registration, business and trading names |
+| `contractor` | `US-CA` | [California CSLB](https://www.cslb.ca.gov) | licence status, number, issue/expiry dates, classifications, bond, workers' comp, complaint disclosure and arbitration records |
+| `health` | `US` | [US NPPES NPI Registry](https://npiregistry.cms.hhs.gov) | enrolment status, NPI, provider name, taxonomy, declared state licence; optional state/city/taxonomy filters |
+| `health` | `US-FL` | [Florida MQA](https://mqa-internet.doh.state.fl.us/MQASearchServices/HealthCareProviders) | licence status, number, profession, expiry, issue date, discipline and public-complaint flags |
+
+`health / US-FL` is a **cross-registry** check: TinyVerify queries the federal NPI registry and the Florida medical board together, keeps both records, and prefers the state board record because it carries expiry and discipline. `health / US` with `"state": "FL"` does the same.
 
 Every adapter returns the same record shape, so adding a registry does not change the API or the UI:
 
@@ -53,33 +59,37 @@ Every adapter returns the same record shape, so adding a registry does not chang
   "licence_type": "business",
   "jurisdiction": "UK",
   "status": "active",
+  "status_bounty": "active",
   "licence_number": "00445790",
   "expiry_date": null,
   "disciplinary_actions": ["not published by this registry"],
+  "disciplinary_records": [],
   "source_name": "UK Companies House",
   "source_url": "https://find-and-update.company-information.service.gov.uk/company/00445790",
-  "checked_at": "2026-11-04T12:55:10.106Z",
+  "checked_at": "2026-11-05T05:26:28.639Z",
   "match_quality": "exact",
+  "name_number_mismatch": false,
   "registry_id": "companies-house-uk",
   "status_detail": "Active",
   "matched_name": "TESCO PLC",
+  "total_found": 1,
   "fields": {
     "company_type": "Public limited Company",
     "incorporated_on": "1947-11-27",
     "registered_office": "Tesco House, Shire Park, Kestrel Way, Welwyn Garden City, United Kingdom, AL7 1GA",
     "sic": ["47110 - Retail sale in non-specialised stores with food, beverages or tobacco predominating"]
   },
-  "notes": ["This overview page does not list disciplinary actions; officer disqualifications are a separate register."]
+  "notes": ["Officer disqualifications are a separate register and were not checked here: ..."]
 }
 ```
 
-Field meanings and the exact matching rules are in [docs/verification.md](docs/verification.md). Per-registry notes and rejected sources are in [docs/registries.md](docs/registries.md).
+`status` is the register's own state mapped to a shared vocabulary; `status_bounty` is the coarser active / expired / suspended / unknown view. Field meanings, thresholds and the full status table are in [docs/verification.md](docs/verification.md). Per-registry notes and rejected sources are in [docs/registries.md](docs/registries.md). Machine-readable contracts: [docs/openapi.yaml](docs/openapi.yaml) and [docs/record.schema.json](docs/record.schema.json).
 
 ---
 
 ## How TinyFish is used
 
-TinyFish does the web work that plain HTTP cannot. Four endpoints are used, each for a job the other cannot do:
+TinyFish does the web work that plain HTTP cannot. Four endpoints are used, each for a job the other cannot do.
 
 ### 1. TinyFish Search — resolve the official record page
 
@@ -95,8 +105,9 @@ A result from any other domain is discarded. Search never supplies a status; it 
 `lib/tinyfish.js` batches up to 10 URLs per Fetch call (`format: markdown` or `html`, `ttl: 0` for a fresh read). Used by:
 
 - **UK Companies House** — fetch the company overview page and the paginated search result list (HTML parsing for links).
-- **US NPPES NPI Registry** — Node's `fetch` fails with `EAI_AGAIN` for `npiregistry.cms.hhs.gov`; TinyFish Fetch reads the JSON API reliably, returned as `html` and parsed as JSON.
-- **California CSLB** — Search resolves the short record URL, then a direct fetch reads the detail page. (CSLB is not bot-protected for plain GETs.)
+- **US NPPES NPI Registry** — Node's `fetch` can fail with `EAI_AGAIN` for `npiregistry.cms.hhs.gov`; TinyFish Fetch reads the JSON API reliably, returned as `html` and parsed as JSON.
+
+Australia and Florida are read over direct HTTPS because their pages are server-rendered and need no browser. CSLB detail pages are also read directly; Search only resolves the short record URL.
 
 ### 3. TinyFish Agent — drive CSLB's form when Search fails
 
@@ -104,16 +115,7 @@ CSLB's "Check A License" name search is a session-based ASP.NET form. TinyFish S
 
 When Search returns no CSLB record URL, TinyVerify starts a **TinyFish Agent** run on `CheckLicense.aspx`, tells it to choose *Check by Business Name*, enter the name, submit, and return up to 10 licence numbers using a JSON output schema. The Agent only supplies **licence numbers**; TinyVerify then fetches each official detail page and reads the status, dates and disclosures itself. That keeps the agent out of the trust path.
 
-Live evidence from this build:
-
-```text
-node cli.js verify "HALA TREE SERVICE" --type contractor --jurisdiction US-CA
-Match quality: multiple (78.8 s)
-  HALA TREE SERVICES   | 574648  | expired | https://www.cslb.ca.gov/574648
-  HALA TREE SERVICE INC| 1000000 | expired | https://www.cslb.ca.gov/1000000
-```
-
-Both records were confirmed against CSLB directly (`1000000`: expired 2019-01-31; `574648`: cancelled 1993-05-24). The agent result is cached for 10 minutes so a retry does not start another browser run.
+The fallback is budgeted: **3 runs per hour per instance**, **2 concurrent runs**, a 10-minute result cache, and a hard cap on the prompt's subject text. The subject is quoted as a JSON literal and described as data, not instructions.
 
 ### 4. TinyFish Monitor — watch the record for changes
 
@@ -138,22 +140,32 @@ A monitor check re-reads the source and diffs the new snapshot against the store
 
 A transient registry miss — a timeout, a bot challenge, a page that no longer parses — is **not** a change. The previous snapshot is kept and the check is marked failed, because "the site was down" is not "the licence was revoked".
 
+When `TINYVERIFY_DEMO=1`, the UI exposes a clearly labelled **Simulate change (demo)** button. It appends an event marked `simulated: true` and `detected_by: "TinyVerify demo simulator (not a live read)"`; it **never mutates the live snapshot**. Everything else in the change log comes from a real re-read.
+
 ---
 
-## Ambiguity handling
+## Matching, ambiguity and status
 
-`match_quality` is always one of `exact`, `close`, `multiple`, `no_match`, `unsupported`.
+`match_quality` is always one of `exact`, `close`, `mismatch`, `multiple`, `no_match`, `unsupported`.
 
 | Situation | Behaviour |
 |---|---|
 | One record, name identical after normalisation | `exact` |
-| One record, name a plausible variant (e.g. missing legal suffix) | `close`, with `matched_name` and confidence |
-| Several records above the match threshold | `multiple` — every candidate returned, **nothing auto-selected** |
+| One record, plausible variant (missing legal suffix, reversed comma, middle initial) | `close`, with `matched_name`, confidence and `variant_used` |
+| Several records above the threshold | `multiple` — every candidate returned, **nothing auto-selected** |
 | Records below the threshold | `near_misses` — shown separately, never counted as matches |
 | No record at all | `no_match`, plus the exact searches performed |
-| Type/jurisdiction we do not cover | `unsupported`, with the supported combinations |
+| Name supplied with a number that belongs to a different name | `mismatch`, `name_number_mismatch: true`, explicit note; record still returned because the number matched |
+| Number supplied without a name | `exact` by number, never a fuzzy name guess |
+| Type/jurisdiction not covered | `unsupported`, with the supported combinations |
 
-Name variants (comma order, missing legal suffix, middle initials) are tried at most twice. Two registries answering for the same subject are returned as separate records; if their statuses disagree the response is `status: "unknown"` with both records and an explicit conflict note, never a merge.
+Name matching requires **every meaningful query token to occur in the candidate** (exact or within a 0.85 spelling distance). Legal and generic tokens (`Ltd`, `PLC`, `Group`, `Services`, …) are dropped only for comparison, never from the displayed name. A partial word overlap therefore cannot become a "close" match, which is what stops a nonsense UK query from returning a random company. The close threshold is **0.80**.
+
+Registry wording is preserved in `status_detail`; the shared status vocabulary is:
+
+`active`, `expired`, `suspended`, `revoked`, `dissolved`, `in_liquidation`, `inactive`, `unknown`.
+
+`status_bounty` collapses that to `active`, `expired`, `suspended`, `unknown` for a simple clearance view. Disagreeing registries are returned side by side with `conflict: true` and `status: "unknown"` — never merged.
 
 ![TinyVerify returning multiple candidates for "Air New Zealand" with no auto-selection](docs/screenshot-candidates.png)
 
@@ -161,20 +173,22 @@ Name variants (comma order, missing legal suffix, middle initials) are tried at 
 
 ## HTTP API
 
-All responses are JSON. `POST /api/verify` is the main entry point; no API key is needed by callers.
+All responses are JSON. `POST /api/verify` is the main entry point. See [docs/openapi.yaml](docs/openapi.yaml) for the full contract.
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/api/health` | Version, configured registries, storage backend |
+| `GET` | `/api/health` | Version, configured registries, storage backend, demo flag |
 | `GET` | `/api/registries` | Registry metadata + supported combinations |
 | `GET` | `/api/coverage` | Coverage matrix only |
 | `POST` | `/api/verify` | Verify a record |
-| `GET` | `/api/monitors` | List this browser's watches (`X-TinyVerify-Owner`) |
-| `POST` | `/api/monitors` | Create a watch from a confirmed record |
-| `GET` | `/api/monitors/:id` | Watch + change events |
-| `POST` | `/api/monitors/:id/check` | Re-read the source now, diff, return any event |
-| `DELETE` | `/api/monitors/:id` | Delete the watch and its TinyFish Monitor |
-| `POST` | `/api/webhooks/tinyfish` | TinyFish Monitor callback (optional shared secret) |
+| `GET` | `/api/monitors` | List watches owned by the caller's `X-TinyVerify-Owner` token (admin key sees all) |
+| `POST` | `/api/monitors` | Create a watch from a confirmed record; returns its `manage_token` once |
+| `GET` | `/api/monitors/:id` | Watch + change events (watch token required) |
+| `GET` | `/api/monitors/:id/events` | Change events only (watch token required) |
+| `POST` | `/api/monitors/:id/check` | Re-read the source now, diff, return any event (watch token required) |
+| `POST` | `/api/monitors/:id/simulate` | Demo-only labelled event; requires `TINYVERIFY_DEMO=1` |
+| `DELETE` | `/api/monitors/:id` | Delete the watch and its TinyFish Monitor (watch token required) |
+| `POST` | `/api/webhooks/tinyfish` | TinyFish Monitor callback |
 
 ```bash
 curl -s https://tinyverify.vercel.app/api/verify \
@@ -185,12 +199,40 @@ curl -s https://tinyverify.vercel.app/api/verify \
 ```bash
 curl -s https://tinyverify.vercel.app/api/verify \
   -H 'content-type: application/json' \
-  -d '{"subject":"DONE RIGHT DISCOUNT FLOORING","licence_type":"contractor","jurisdiction":"US-CA"}'
+  -d '{"subject":"JOHN HORATIO SMITH II","licence_type":"health","jurisdiction":"US-FL","number":"ME182088"}'
 ```
 
 Every successful response includes `checked_at` and, per record, `source_url`. Results are cached for 10 minutes; a cached response keeps the original `source_url` and `checked_at` and says so in `notes`, with `cached: true`.
 
-Watches are scoped to a random `X-TinyVerify-Owner` token generated by the browser; the server stores only its SHA-256 hash and never returns it. POST bodies are capped at 64 KB, and requests are rate limited per client (verify 60/min, watch creation 20/min, checks 30/min); counters live in Redis when it is configured, so the limit holds across server instances. Security headers include a strict CSP, `frame-ancestors 'none'`, `nosniff` and `no-referrer`.
+### Watch security model
+
+- A watch is created with a random browser **owner token** (`X-TinyVerify-Owner`); the server stores only its SHA-256 hash.
+- Creation also returns a random per-watch **`manage_token`** exactly once. Only its SHA-256 hash is stored. `GET`, `check` and `DELETE` require it as `X-TinyVerify-Watch-Token`; knowing a monitor id is not enough.
+- `GET /api/monitors` returns only watches owned by the caller, or all watches when `X-TinyVerify-Admin` matches `TINYVERIFY_ADMIN_KEY`.
+- Watches created before per-watch tokens still fall back to the owner hash, so existing users are not locked out.
+
+### Rate limits and abuse controls
+
+| Action | Limit |
+|---|---|
+| `POST /api/verify` | 20 / minute per client |
+| Create a watch | 5 / day per client |
+| Check a watch | 30 / minute per client |
+| TinyFish webhook | 120 / minute per client |
+| CSLB Agent fallback | 3 runs / hour, 2 concurrent |
+
+`refresh: true` bypasses the short cache and costs an upstream read, so it is honoured only for a caller with an owner or admin credential. Anonymous refresh requests receive the normal cached response.
+
+Request bodies are capped at 64 KB (256 KB for webhooks). Security headers include a strict CSP, `frame-ancestors 'none'`, `nosniff`, `no-referrer` and HSTS.
+
+### Webhook verification
+
+In production, `TINYVERIFY_WEBHOOK_SECRET` is required; without it the webhook returns `503 WEBHOOK_NOT_CONFIGURED`. Accepted proof:
+
+- `?token=<secret>` (legacy), or
+- HMAC-SHA256 of `<timestamp>.<raw body>` (or the raw body) in `X-TinyFish-Signature`, with `X-TinyFish-Timestamp` within **±300 seconds**.
+
+Payload hashes are remembered for five minutes, so a replay is acknowledged and ignored. The webhook never trusts the payload as the source of truth: it re-reads the official record through TinyVerify's pipeline before creating an event.
 
 ---
 
@@ -201,7 +243,8 @@ Requires Node 22+. Zero runtime dependencies.
 ```bash
 cp .env.example .env          # add TINYFISH_API_KEY
 npm run dev                   # http://localhost:3000
-npm test                      # 42 unit tests, no network
+npm test                      # 58 unit tests, no network
+npm run test:live             # 12 real registry checks (LIVE=1)
 npm run check                 # syntax check of entry points
 ```
 
@@ -209,8 +252,9 @@ npm run check                 # syntax check of entry points
 
 ```ini
 TINYFISH_API_KEY=...
-# optional
-TINYVERIFY_WEBHOOK_SECRET=...
+TINYVERIFY_WEBHOOK_SECRET=...        # required in production
+TINYVERIFY_ADMIN_KEY=...             # optional admin view
+TINYVERIFY_DEMO=1                    # optional demo simulator
 TINYVERIFY_MONITOR_CRON=0 8 * * *
 TINYVERIFY_PUBLIC_URL=https://your-deployment
 KV_REST_API_URL=...
@@ -224,23 +268,23 @@ Monitors persist in Upstash Redis (`KV_REST_API_URL` + `KV_REST_API_TOKEN`) in t
 ## Tests and evidence
 
 ```text
-npm test  →  42 tests, 42 pass
+npm test        →  58 pass, 0 fail, 12 skipped (live tests)
+npm run test:live →  12 pass, 0 fail
 ```
 
-Covered without network access: name normalisation and variants, status vocabulary, date parsing (day-first and month-first), all four registry parsers against captured live pages, match classification, registry resolution, snapshot diffing, monitor lifecycle and owner scoping, transient-miss handling, HTTP routing and error shapes, body limits, rate limiting and security headers.
+Unit coverage: name normalisation and variants, the token gate that rejects partial overlaps, status vocabulary (including liquidation / dissolved / inactive), date parsing, all six registry parsers against pages captured from the live sites, mismatch detection, total-count handling, registry resolution (including the Florida cross-registry rule), snapshot diffing, monitor lifecycle and per-watch access control, transient-miss handling, webhook signatures/replay, HTTP routing, error shapes, body limits, rate limiting and security headers.
 
-Live evidence captured during the build is in `spikes/` (`api-proof.json` for Search/Fetch/Agent/Monitor responses, `cslb-agent.mjs` for the Agent run).
-
----
+The live suite checks: UK exact / nonsense / name-number mismatch / liquidation, NZ, AU ABN and checksum, NPI true count and exact number, CSLB revocation plus arbitration disclosure, the Florida NPI + MQA cross-check, and special-character handling. Live probe evidence is in `docs/evidence/` (`api-proof.json` for Search/Fetch/Agent/Monitor responses, `cslb-agent.mjs` for the Agent run, `probe-mqa.mjs` for the Florida number-search redirect).
 
 ## Known limits
 
-- **Not covered yet:** Australia (AHPRA) and UK health regulators (HCPC, GMC). AHPRA works only through a metered stealth Agent run and needs a disambiguation rule; HCPC sits behind a Cloudflare interstitial; GMC renders its register client-side. They are documented as rejected sources rather than shipped as broken checks.
+- **Not covered:** UK HCPC (Cloudflare), UK GMC (client-rendered), Australia AHPRA (F5 challenge and no disambiguation rule), Ireland CRO (no clean public record page), Washington DOH (Salesforce JS), Texas TMB, Florida DBPR, and California DCA (API requires `app_id`/`app_key`). Each is documented as a rejected source in [docs/registry-research.md](docs/registry-research.md) rather than shipped broken.
 - **CSLB name search** depends on either TinyFish Search finding a record URL or the Agent fallback running; a name-only lookup can take up to ~2.5 minutes. Supplying a licence number is always faster and exact.
-- **NPI is an enrolment registry**, not a state licence board. It shows the state licence number a provider declared but does not publish that licence's status; the record says so.
-- **UK Companies House / NZ** company records have no expiry date. `expiry_date` is `null` and the UI says "Not applicable" instead of inventing one.
+- **NPI is an enrolment registry**, not a state licence board. It shows the state licence number a provider declared but does not publish that licence's status; the record says so, and the Florida check pairs it with the state board.
+- **UK Companies House / NZ / AU** records have no expiry date. `expiry_date` is `null` and the UI says "Not applicable" instead of inventing one.
+- **Florida MQA number search** answers an exact licence number with a 302 straight to the detail page. The adapter follows that redirect; it does not read a result table that is not sent.
 - **Monitors** re-verify through TinyVerify's own pipeline on every check, so a change event always carries a fresh `source_url` and `checked_at`, even if the TinyFish webhook payload is incomplete.
 
 ## Licence and data
 
-Application code: MIT. Registry data remains subject to each registry's terms. Companies House data is Crown copyright; CSLB and NPPES are US public records; NZ Companies Office data is published by the New Zealand Companies Office. TinyVerify reports records; it does not give legal or hiring advice.
+Application code: MIT. Registry data remains subject to each registry's terms. Companies House data is Crown copyright; CSLB, NPPES and Florida MQA are US public records; NZ Companies Office data is published by the New Zealand Companies Office; ABN data is published by the Australian Business Register. TinyVerify reports records; it does not give legal or hiring advice.

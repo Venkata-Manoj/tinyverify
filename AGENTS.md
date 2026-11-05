@@ -29,8 +29,7 @@ TinyVerify checks a person, business or contractor against live official registr
 | `lib/ratelimit.js` | Per-instance cost guard for paid endpoints |
 | `lib/store.js` | KV/Upstash or atomic file persistence |
 | `tests/` | Node test runner, no network; fixtures captured from live pages |
-| `docs/` | Verification rules and registry research |
-| `spikes/` | Live API evidence and one-off probes (not runtime code) |
+| `docs/` | Verification rules and registry research; live probe evidence in `docs/evidence/` |
 
 ## Registries
 
@@ -40,12 +39,15 @@ TinyVerify checks a person, business or contractor against live official registr
 | `nz-companies` | business | NZ | Direct HTTPS |
 | `cslb-ca` | contractor | US-CA | TinyFish Search + HTTPS; Agent fallback |
 | `npi-us` | health | US | TinyFish Fetch (JSON API) |
+| `abn-au` | business | AU | Direct HTTPS (ABN Lookup) |
+| `mqa-fl` | health | US-FL | Direct HTTPS (ASP.NET form + detail page) |
 
 ## Commands
 
 ```bash
 npm run dev      # local server on :3000, reads .env
 npm test         # unit tests, no network
+npm run test:live  # real registry checks (LIVE=1, ~40s)
 npm run check    # syntax check
 node cli.js verify "Tesco PLC" --type business --jurisdiction UK
 ```

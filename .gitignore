@@ -9,6 +9,7 @@ dist/
 .tx/
 *.log
 spikes/*.log
+docs/evidence/*.log
 .playwright-mcp/
 
 .vercel
