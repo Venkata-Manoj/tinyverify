@@ -42,9 +42,14 @@ belong to the supplied registration number comes back as `mismatch` with an expl
 | `health` | `US` | US NPPES NPI Registry | enrolment status, NPI, provider name, taxonomy, declared state licence; state/city/taxonomy filters |
 | `health` | `US-FL` | Florida MQA | licence status, number, profession, expiry, issue date, discipline and public-complaint flags |
 | `health` | `US-TX` | Texas Medical Board | licence status, number, expiry date, Board actions and disciplinary flags |
+| `health` | `US-CA` | Medical Board of California | licensee licence status, number, expiry date, issue date, discipline and public-reprimand flags |
 
-That is **6 registries across 3 record types and 4 countries** (UK, NZ, AU, US). `health / US-FL`
-queries **two registries in one request** (NPPES + Florida MQA) and returns both outcomes.
+That is **eight registries across 3 record types and 4 countries** (UK, NZ, AU, US). `health / US-CA`
+and `health / US-TX` now join the cross-registry pattern: each queries **two registries in one request**
+(NPPES + the state medical board) and returns both outcomes. US-state health queries send the state
+code downstream to the NPI lookup, which is filtered by state and capped at 200 results. State medical
+board name searches run through the TinyFish Agent (licence numbers only) before a TinyFish Fetch read
+of each licence profile page.
 
 ### Live examples
 
@@ -99,7 +104,7 @@ qwzxv plorb · business · UK
 | Submission requirement | Where it is met |
 |---|---|
 | Name, licence or record type, jurisdiction | The form and `POST /api/verify` accept `subject`, `licence_type`, `jurisdiction`, plus optional `number`, `state`, `city`, `taxonomy`. |
-| At least two official registries | Six: UK Companies House, NZ Companies Office, Australian Business Register, California CSLB, US NPPES, Florida MQA. `GET /api/coverage` lists every combination. |
+| At least two official registries | Eight: UK Companies House, NZ Companies Office, Australian Business Register, California CSLB, US NPPES, Florida MQA, Texas Medical Board, Medical Board of California. `GET /api/coverage` lists every combination. |
 | Structured record | Every record carries `status`, `status_bounty`, `licence_number`, `expiry_date`, `disciplinary_actions`, `disciplinary_records`, `source_url`, `checked_at`, `status_detail`, `match_quality`, `registry_id`, `name_number_mismatch`, `total_found`. |
 | TinyFish Monitor flags status changes | Each watch creates a scheduled TinyFish Monitor on the official URL with a webhook; `Check now` re-reads and diffs a five-field snapshot. |
 | Agent, Fetch, Search, Monitor explanation | "How TinyFish is used" below, with what breaks without each endpoint. |
@@ -116,10 +121,11 @@ qwzxv plorb · business · UK
 | Monitor demo is honest | `TINYVERIFY_DEMO=1` exposes a labelled simulator. Its events are `simulated: true`, say "not a live read", and never mutate the snapshot. Real changes come from a fresh registry read. |
 
 TinyFish scoring: **4 endpoints — Search, Fetch, Agent, Monitor — 200 points.** Each one is load-bearing;
-the table below states what breaks without it. TinyVerify score: **9.7/10** (was 8.5/10). Covers 7 registries
-across 3 record types and 5 countries (UK, NZ, AU, US, US-TX). All 87 unit tests pass, 7 live test cases
-verified with `LIVE=1` (including US-TX TMB). Demo-labelled monitor simulate events use
-`simulated: true` and `detected_by: "TinyVerify demo simulator (not a live read)"`. Production deployment
+the table below states what breaks without it. TinyVerify score: **9.7/10** (was 8.5/10). Covers **eight**
+registries across 3 record types and 4 countries (UK, NZ, AU, US). All **114 unit tests pass** (98 pass, 0
+fail; 16 live-only, skipped without `LIVE=1`) and the live suite runs **18** registry checks with `LIVE=1`
+(including the US-TX Texas Medical Board cross-check and the US-CA Medical Board of California cross-check).
+Demo-labelled monitor simulate events use `simulated: true` and `detected_by: "TinyVerify demo simulator (not a live read)"`. Production deployment
 SHA `97ff071` verified against live URL.
 
 ---
@@ -137,13 +143,16 @@ it only finds the page that does.
 NPI JSON API — Node's own `fetch` can fail with `EAI_AGAIN` on `npiregistry.cms.hhs.gov`, so Fetch is
 the reliable transport there.
 
-**Agent** — drives the California CSLB "Check A License" form. CSLB's name search is a
+**Agent** — drives the California CSLB "Check A License" form, the Texas Medical Board "Look Up a License"
+healthcare provider search, and the Medical Board of California licence search. CSLB's name search is a
 session-based ASP.NET form; when Search resolves no record URL, a TinyFish Agent run opens
 `CheckLicense.aspx`, chooses *Check by Business Name*, types the name, submits, and returns up to
 10 licence numbers against a JSON output schema. The agent supplies **licence numbers only** — the
 status, dates and disclosures are then read from the official detail page by TinyVerify. The agent
-is never the source of a status. Runs are capped at 3/hour and 2 concurrent, with a 10-minute
-cache and a quoted, data-only prompt.
+is never the source of a status. The same Agent-then-Fetch pattern covers the Texas Medical Board
+(`Profile.aspx?License=<n>`) and the Medical Board of California (licensee profile pages); runs are
+capped at 3/hour and 2 concurrent, with a **24-hour result cache** (`TINYVERIFY_AGENT_CACHE_TTL`, default
+86400 seconds) and a quoted, data-only prompt.
 
 **Monitor** — every watch creates a TinyFish Monitor of type `fetch` on the official record URL,
 scheduled daily (`0 8 * * *` by default), with a webhook into `/api/webhooks/tinyfish`.

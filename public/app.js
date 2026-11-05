@@ -325,14 +325,15 @@
     'Extracting and normalising fields…',
     'Checking the source link…'
   ];
+  const DEFAULT_STAGES = STAGES;
   const STAGE_INTERVAL_MS = 5000;
 
   let stageTimer = null;
   let elapsedTimer = null;
 
-  function renderStages(currentIndex) {
+  function renderStages(currentIndex, stages = STAGES) {
     clearNode(stagesEl);
-    STAGES.forEach((message, i) => {
+    (stages || STAGES).forEach((message, i) => {
       let cls = null;
       if (i < currentIndex) cls = 'done';
       else if (i === currentIndex) cls = 'current';
@@ -343,14 +344,29 @@
     });
   }
 
-  function startLoading(subject) {
+  /** Agent-driven boards (state medical boards) run a browser search before the fetch. */
+  function stagesFor(query) {
+    const jurisdiction = String(query?.jurisdiction || '').toUpperCase();
+    const healthUs = ['US', 'US-CA', 'US-FL', 'US-TX'].includes(jurisdiction);
+    if (healthUs && !query?.number) {
+      return [
+        'Running the licensed search agent…',
+        'Fetching the live record…',
+        'Extracting and normalising fields…',
+        'Checking the source link…'
+      ];
+    }
+    return DEFAULT_STAGES;
+  }
+
+  function startLoading(subject, stages = STAGES) {
     loadingSubjectEl.textContent = subject;
     loadingTimerEl.textContent = '0s';
-    renderStages(0);
+    renderStages(0, stages);
     let stage = 0;
     stageTimer = setInterval(() => {
-      stage = Math.min(stage + 1, STAGES.length - 1);
-      renderStages(stage);
+      stage = Math.min(stage + 1, (stages || STAGES).length - 1);
+      renderStages(stage, stages);
     }, STAGE_INTERVAL_MS);
     let seconds = 0;
     elapsedTimer = setInterval(() => {
@@ -401,7 +417,7 @@
     submitButton.disabled = true;
     const controller = new AbortController();
     state.verifyAbort = controller;
-    startLoading(query.subject || `registration ${query.number}`);
+    startLoading(query.subject || `registration ${query.number}`, stagesFor(query));
     try {
       const payload = await apiFetch('/api/verify', {
         method: 'POST',

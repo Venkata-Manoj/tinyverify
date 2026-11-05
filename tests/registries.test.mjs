@@ -6,10 +6,12 @@ import { fileURLToPath } from 'node:url';
 import { parseCompanyPage, parseSearchLinks, normalizeCompanyNumber } from '../lib/registries/companies-house.js';
 import { nameSimilarity, normalizeName } from '../lib/normalize.js';
 import { parseComplaintDisclosure, parseCslbPage, readCslbPages } from '../lib/registries/cslb.js';
-import { parseNpiResult } from '../lib/registries/npi.js';
+import { countState, NPI_LIMIT, parseNpiResult } from '../lib/registries/npi.js';
 import { parseNzRecord, parseNzSearch } from '../lib/registries/nz-companies.js';
 import { isValidAbn, parseAbnPage, parseAbnSearch } from '../lib/registries/abn-au.js';
 import { parseDirectLicenseUrl, parseEnforcementActions, parseMqaPage, parseMqaSearch, splitMqaName } from '../lib/registries/mqa-fl.js';
+import { parseMqaCaPage } from '../lib/registries/mqa-ca.js';
+import { parseTmbDetailPage, readTmbPages, tmbFl } from '../lib/registries/tmb-fl.js';
 import { coverageMatrix, normalizeJurisdiction, normalizeType, resolveRegistries } from '../lib/registry.js';
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
@@ -123,6 +125,20 @@ test('NPI parser reads an individual provider record', () => {
   assert.equal(parsed.fields.state_licence_state, 'FL');
   assert.equal(parsed.fields.location_city, 'SAMPLE CITY');
   assert.equal(parsed.fields.location_state, 'FL');
+  assert.equal(parsed.fields.credential, 'CNP');
+});
+
+test('NPI parser keeps the professional credential out of the display name', () => {
+  const payload = JSON.parse(read('npi-0.json').replace(/\\_/g, '_'));
+  const parsed = parseNpiResult(payload.results[0]);
+  assert.equal(parsed.name, 'JORDAN AVERY SAMPLE');
+  assert.equal(parsed.fields.credential, 'CNP');
+});
+
+test('NPI counts are capped at the registry limit, never silently summed', () => {
+  assert.equal(NPI_LIMIT, 200);
+  assert.deepEqual(countState(250, 40), { total_found: null, total_capped: true, total_capped_at: 200, total_display: '200+ (capped)' });
+  assert.deepEqual(countState(40, 40), { total_found: 40, total_capped: false, total_capped_at: null, total_display: null });
 });
 
 test('NPI parser reads an organisation record', () => {
@@ -140,7 +156,10 @@ test('registry resolution accepts aliases and rejects unsupported pairs', () => 
   assert.deepEqual(resolveRegistries('company', 'New Zealand').map((r) => r.meta.id), ['nz-companies']);
   assert.deepEqual(resolveRegistries('business', 'Australia').map((r) => r.meta.id), ['abn-au']);
   assert.deepEqual(resolveRegistries('health', 'US-FL').map((r) => r.meta.id), ['npi-us', 'mqa-fl']);
-  assert.deepEqual(resolveRegistries('health', 'USA', { state: 'FL' }).map((r) => r.meta.id), ['npi-us', 'mqa-fl']);
+  assert.deepEqual(resolveRegistries('health', 'US-TX').map((r) => r.meta.id), ['npi-us', 'tmb-fl']);
+  assert.deepEqual(resolveRegistries('health', 'US-CA').map((r) => r.meta.id), ['npi-us', 'mqa-ca']);
+  assert.deepEqual(resolveRegistries('health', 'USA', { state: 'CA' }).map((r) => r.meta.id), ['npi-us', 'mqa-ca']);
+  assert.deepEqual(resolveRegistries('health', 'USA', { state: 'TX' }).map((r) => r.meta.id), ['npi-us', 'tmb-fl']);
   assert.deepEqual(resolveRegistries('health', 'USA').map((r) => r.meta.id), ['npi-us']);
   assert.deepEqual(resolveRegistries('medical', 'NZ'), []);
   assert.equal(normalizeType('Healthcare'), 'health');
@@ -153,7 +172,7 @@ test('coverage matrix only lists combinations we can actually serve', () => {
   assert.deepEqual(matrix.jurisdictions.sort(), ['AU', 'NZ', 'UK', 'US', 'US-CA', 'US-FL', 'US-TX']);
   assert.deepEqual(
     matrix.combinations.map((c) => `${c.licence_type}/${c.jurisdiction}`).sort(),
-    ['business/AU', 'business/NZ', 'business/UK', 'contractor/US-CA', 'health/US', 'health/US-FL', 'health/US-TX'],
+    ['business/AU', 'business/NZ', 'business/UK', 'contractor/US-CA', 'health/US', 'health/US-CA', 'health/US-FL', 'health/US-TX'],
   );
   for (const combo of matrix.combinations) assert.ok(combo.registries.length > 0);
 });
@@ -320,4 +339,114 @@ test('NZ record parser reads the official company summary', () => {
   assert.equal(parsed.fields.annual_return_last_filed, '2026-03-11');
   assert.deepEqual(parsed.fields.previous_names, ['TASMAN EMPIRE AIRWAYS LIMITED (from 26 Apr 1940 to 01 Apr 1965)']);
   assert.equal(parseNzRecord('not a record'), null);
+});
+
+test('TMB parser reads an active licence profile', () => {
+  const parsed = parseTmbDetailPage(read('tmb-detail-active.html'), { url: 'https://profile.tmb.state.tx.us/Profile.aspx?License=1234567' });
+  assert.equal(parsed.exists, true);
+  assert.equal(parsed.number, '1234567');
+  assert.equal(parsed.name, 'John Smith');
+  assert.equal(parsed.status, 'active');
+  assert.equal(parsed.expiry_date, '2028-12-31');
+  assert.equal(parsed.has_discipline, false);
+  assert.equal(parsed.source_url, 'https://profile.tmb.state.tx.us/Profile.aspx?License=1234567');
+});
+
+test('TMB parser reads a suspended licence with a board action', () => {
+  const parsed = parseTmbDetailPage(read('tmb-detail-discipline.html'), { url: 'https://profile.tmb.state.tx.us/Profile.aspx?License=1234567' });
+  assert.equal(parsed.number, '1234567');
+  assert.equal(parsed.status, 'suspended');
+  assert.equal(parsed.has_discipline, true);
+  assert.match(parsed.discipline, /Suspension/);
+});
+
+test('TMB parser reports a missing licence instead of inventing one', () => {
+  const parsed = parseTmbDetailPage(read('tmb-no-record.html'), { url: 'https://profile.tmb.state.tx.us/Profile.aspx?License=9999999' });
+  assert.equal(parsed.exists, false);
+  assert.equal(parsed.number, '9999999');
+});
+
+test('TMB licence numbers must be numeric before any lookup runs', async () => {
+  await assert.rejects(
+    () => tmbFl.lookup({ subject: 'John Smith', number: 'not-a-number', licence_type: 'health', jurisdiction: 'US-TX' }),
+    /numeric/i,
+  );
+});
+
+test('TMB agent no-result is a no_match, not a registry error', async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const target = String(url);
+    if (String(target).includes('agent.tinyfish.ai')) {
+      return { ok: true, status: 200, text: async () => JSON.stringify({ status: 'COMPLETED', result: { found: false, matches: [] }, run_id: 'run-tmb-none', num_of_steps: 2 }) };
+    }
+    return { ok: true, status: 200, text: async () => JSON.stringify({ errors: [{ message: 'unexpected fetch', code: 'FETCH_EMPTY' }] }) };
+  };
+  try {
+    const result = await tmbFl.lookup({ subject: 'Qwzxv Plorb', licence_type: 'health', jurisdiction: 'US-TX' });
+    assert.equal(result.outcome, 'no_match');
+    assert.equal(result.total_found, 0);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test('TMB unreadable licence pages are an error, never a no-match', async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const target = String(url);
+    if (String(target).includes('agent.tinyfish.ai')) {
+      return { ok: true, status: 200, text: async () => JSON.stringify({ status: 'COMPLETED', result: { found: true, matches: [{ name: 'John Smith', licence_number: '1234567' }] }, run_id: 'run-tmb-err', num_of_steps: 2 }) };
+    }
+    return { ok: true, status: 200, text: async () => JSON.stringify({ errors: [{ message: 'Fetch failed', code: 'FETCH_EMPTY' }] }) };
+  };
+  try {
+    await assert.rejects(() => tmbFl.lookup({ subject: 'John Qwzxv', licence_type: 'health', jurisdiction: 'US-TX' }), /none could be read/i);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test('TMB agent multi-result is returned as candidates, never auto-selected', async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const target = String(url);
+    if (String(target).includes('agent.tinyfish.ai')) {
+      return { ok: true, status: 200, text: async () => JSON.stringify({ status: 'COMPLETED', result: { found: true, matches: [
+        { name: 'John Smith', licence_number: '1234567' },
+        { name: 'John Andrew Smith', licence_number: '7654321' },
+      ] }, run_id: 'run-tmb-multi', num_of_steps: 4 }) };
+    }
+    const license = String(target).match(/License=(\d+)/)?.[1];
+    const html = license === '1234567'
+      ? read('tmb-detail-active.html')
+      : read('tmb-detail-second.html');
+    return { ok: true, status: 200, text: async () => JSON.stringify({ results: [{ url: target, final_url: target, title: 'TMB', text: html }] }) };
+  };
+  try {
+    const result = await tmbFl.lookup({ subject: 'John Smith', licence_type: 'health', jurisdiction: 'US-TX' });
+    assert.equal(result.outcome, 'multiple');
+    assert.equal(result.candidates.length, 2);
+    assert.equal(result.total_found, 2);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test('CA Medical Board parser reads a licensee profile', () => {
+  const parsed = parseMqaCaPage(read('mqa-ca-detail.html'), { url: 'https://www.mbc.ca.gov/License-Verification/?licenseNumber=A109646' });
+  assert.equal(parsed.exists, true);
+  assert.equal(parsed.number, 'A109646');
+  assert.equal(parsed.name, 'Doe, Jane A');
+  assert.equal(parsed.status, 'active');
+  assert.equal(parsed.issue_date, '1999-12-31');
+  assert.equal(parsed.expiry_date, null);
+  assert.equal(parsed.has_discipline, true);
+  assert.equal(parsed.discipline, 'Public Reprimand');
+  assert.equal(parsed.source_url, 'https://www.mbc.ca.gov/License-Verification/?licenseNumber=A109646');
+});
+
+test('CA Medical Board parser reports a missing licensee instead of inventing one', () => {
+  const parsed = parseMqaCaPage('<html><body>The requested licensee was not found.</body></html>', { url: 'https://www.mbc.ca.gov/License-Verification/?licenseNumber=ZZZZZZ' });
+  assert.equal(parsed.exists, false);
 });

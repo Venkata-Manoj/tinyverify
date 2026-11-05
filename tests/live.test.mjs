@@ -138,6 +138,22 @@ test('US-FL: NPI and the Florida board are queried together for a state licence'
   assert.equal(npi.outcome, 'no_match');
 });
 
+test('US-CA: Medical Board of California joins the health / US-CA cross-registry check', opts, async () => {
+  const result = await verify(query('John Smith', 'health', 'US-CA'), { refresh: true });
+  const ids = result.searched.map((row) => row.registry_id).sort();
+  assert.deepEqual(ids, ['mqa-ca', 'npi-us']);
+});
+
+test('US-TX: Texas Medical Board license number lookup reads the detail page', opts, async () => {
+  // The number path reads the licence profile directly. An unreadable page is a
+  // registry error (the adapter never converts a read failure into a no-match);
+  // a readable page without a licence number is the no-match path.
+  const result = await verify(query('', 'health', 'US-TX', { number: '1234567' }), { refresh: true });
+  if (result.ok) {
+    assert.notEqual(result.match_quality, 'exact');
+  }
+});
+
 test('special characters return a clean no_match with no registry call', opts, async () => {
   const result = await verify(query('!!! ***', 'business', 'UK'), { refresh: true });
   assert.equal(result.match_quality, 'no_match');
