@@ -4,11 +4,11 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseCompanyPage, parseSearchLinks } from '../lib/registries/companies-house.js';
-import { parseComplaintDisclosure, parseCslbPage } from '../lib/registries/cslb.js';
+import { parseComplaintDisclosure, parseCslbPage, readCslbPages } from '../lib/registries/cslb.js';
 import { parseNpiResult } from '../lib/registries/npi.js';
 import { parseNzRecord, parseNzSearch } from '../lib/registries/nz-companies.js';
 import { isValidAbn, parseAbnPage, parseAbnSearch } from '../lib/registries/abn-au.js';
-import { parseDirectLicenseUrl, parseMqaPage, parseMqaSearch } from '../lib/registries/mqa-fl.js';
+import { parseDirectLicenseUrl, parseEnforcementActions, parseMqaPage, parseMqaSearch, splitMqaName } from '../lib/registries/mqa-fl.js';
 import { coverageMatrix, normalizeJurisdiction, normalizeType, resolveRegistries } from '../lib/registry.js';
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
@@ -75,12 +75,12 @@ test('CSLB parser reports a missing licence instead of inventing one', () => {
 test('NPI parser reads an individual provider record', () => {
   const payload = JSON.parse(read('npi-0.json').replace(/\\_/g, '_'));
   const parsed = parseNpiResult(payload.results[0]);
-  assert.equal(parsed.number, '1295346773');
-  assert.equal(parsed.name, 'PLANISE JEAN LOUIS');
+  assert.equal(parsed.number, '1234567893');
+  assert.equal(parsed.name, 'JORDAN AVERY SAMPLE');
   assert.equal(parsed.status, 'active');
   assert.equal(parsed.fields.enumeration_type, 'Individual (NPI-1)');
   assert.equal(parsed.fields.primary_taxonomy, 'Nurse Practitioner, Family');
-  assert.equal(parsed.fields.state_licence_number, 'APRN11008477');
+  assert.equal(parsed.fields.state_licence_number, 'APRN00000000');
   assert.equal(parsed.fields.state_licence_state, 'FL');
 });
 
@@ -178,6 +178,53 @@ test('Florida MQA number search follows the exact-hit redirect', () => {
   assert.equal(parseDirectLicenseUrl('https://example.com/other?LicInd=1&ProCde=2'), null);
   assert.equal(parseDirectLicenseUrl('/LicenseVerification?LicInd=182095'), null);
   assert.equal(parseDirectLicenseUrl(null), null);
+});
+
+test('MQA names keep generational suffixes out of the surname field', () => {
+  assert.deepEqual(splitMqaName('John Horatio Smith II'), { last: 'Smith', first: 'John Horatio' });
+  assert.deepEqual(splitMqaName('Smith, John Horatio II'), { last: 'Smith', first: 'John Horatio' });
+  assert.deepEqual(splitMqaName('John Smith Jr.'), { last: 'Smith', first: 'John' });
+  assert.deepEqual(splitMqaName('Smith, John'), { last: 'Smith', first: 'John' });
+  assert.deepEqual(splitMqaName('Cher'), { last: 'Cher', first: '' });
+});
+
+test('MQA enforcement parsing never fabricates records from page text', () => {
+  const table = parseEnforcementActions(`
+    <table>
+      <tr><th>Date</th><th>Action</th><th>Status</th></tr>
+      <tr><td>01/15/2024</td><td>Fine imposed</td><td>Final</td></tr>
+    </table>`);
+  assert.equal(table.readable, true);
+  assert.equal(table.records.length, 1);
+  assert.equal(table.records[0].date, '2024-01-15');
+  assert.match(table.records[0].description, /Fine imposed/);
+
+  const prose = parseEnforcementActions('<p>Discipline exists. Contact the board for details.</p>');
+  assert.equal(prose.readable, false);
+  assert.deepEqual(prose.records, []);
+
+  const cleared = parseEnforcementActions('<p>No public complaint information is available.</p>');
+  assert.equal(cleared.readable, true);
+  assert.deepEqual(cleared.records, []);
+});
+
+test('CSLB unreadable record pages are an error, not a no-match', async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => ({ ok: false, status: 503, text: async () => '' });
+  try {
+    await assert.rejects(() => readCslbPages(['123456']), /none could be read/i);
+  } finally {
+    globalThis.fetch = original;
+  }
+
+  globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => 'License Number does not exist.' });
+  try {
+    const result = await readCslbPages(['1000000']);
+    assert.equal(result.failed.length, 0);
+    assert.deepEqual(result.pages, [null]);
+  } finally {
+    globalThis.fetch = original;
+  }
 });
 
 test('NZ search parser reads company numbers, names and statuses', () => {
