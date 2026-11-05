@@ -443,6 +443,12 @@ details.rawjson summary { font-size: 13px; color: var(--slate); min-height: var(
   .fields-grid .cell.cell-full { grid-column: span 3; }
 }
 
+/* ---------- registry conflict ---------- */
+
+.conflict-list { display: grid; gap: 20px; }
+.conflict-record { display: grid; gap: 8px; }
+.conflict-source { padding: 0 20px 18px; }
+
 /* ---------- reduced motion ---------- */
 @media (prefers-reduced-motion: reduce) {
   .indeterminate-bar-fill { transition: none; animation: none; width: 100%; left: 0; opacity: 0.45; }

@@ -33,6 +33,13 @@ test('makeRecord fills the required record shape', () => {
   assert.equal(record.cached, false);
 });
 
+test('a missing result count stays null instead of becoming zero', () => {
+  assert.equal(makeRecord(base).total_found, null);
+  assert.equal(makeRecord({ ...base, total_found: 0 }).total_found, 0);
+  assert.equal(makeRecord({ ...base, total_found: 187 }).total_found, 187);
+  assert.equal(makeRecord({ ...base, total_found: null }).total_found, null);
+});
+
 test('makeRecord rejects impossible values instead of guessing', () => {
   assert.equal(makeRecord({ ...base, status: 'probably-fine' }).status, 'unknown');
   assert.equal(makeRecord({ ...base, match_quality: 'vibes' }).match_quality, 'no_match');

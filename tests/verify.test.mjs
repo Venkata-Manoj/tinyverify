@@ -112,6 +112,27 @@ test('total_found reports the largest single-registry count, never a sum', async
   assert.equal(result.conflict, false);
 });
 
+test('a missing registry count stays null instead of becoming zero', async () => {
+  const result = await verify(query, { registries: [registry({ outcome: 'match', record: record() })] });
+  assert.equal(result.total_found, null);
+  assert.equal(result.primary.total_found, null);
+});
+
+test('one name/number mismatch forces the overall quality to mismatch', async () => {
+  const mismatched = record({
+    registry_id: 'fake-a',
+    registry_name: 'Fake A',
+    matched_name: 'ACME WIDGETS LTD',
+  });
+  const exact = record({ registry_id: 'fake-b', registry_name: 'Fake B' });
+  const result = await verify(
+    { subject: 'Tesco PLC', licence_type: 'business', jurisdiction: 'UK', number: '00445790' },
+    { registries: [registry({ outcome: 'match', record: mismatched }, 'fake-a'), registry({ outcome: 'match', record: exact }, 'fake-b')] },
+  );
+  assert.equal(result.name_number_mismatch, true);
+  assert.equal(result.match_quality, 'mismatch');
+});
+
 test('several plausible candidates return multiple and never auto-select one', async () => {
   const fake = registry({
     outcome: 'multiple',
@@ -143,6 +164,15 @@ test('disagreeing registries are returned side by side with an explicit conflict
   const result = await verify(query, { registries: [active, dissolved] });
   assert.equal(result.results.length, 2);
   assert.equal(result.conflict, true);
+  assert.equal(result.primary, null);
+  assert.equal(result.status, 'unknown');
   assert.match(result.notes.join(' '), /Registries disagree/i);
   assert.deepEqual(result.results.map((r) => r.status).sort(), ['active', 'dissolved']);
+});
+
+test('an unsupported combination still returns the required empty arrays', async () => {
+  const result = await verify({ subject: 'A Person', licence_type: 'medical', jurisdiction: 'NZ' });
+  assert.equal(result.match_quality, 'unsupported');
+  assert.deepEqual(result.near_misses, []);
+  assert.equal(result.primary, null);
 });

@@ -726,7 +726,8 @@
 
   function renderPrimaryResult(payload) {
     const body = el('div', 'result-record');
-    const record = payload.primary;
+    const record = payload.primary || (Array.isArray(payload.results) ? payload.results[0] : null);
+    if (!record) return renderNoMatchResult(payload);
     if (payload.results && payload.results.length > 1) {
       body.appendChild(el('p', 'card-meta',
         `${payload.results.length} records were returned; the best match is shown below and the rest are listed underneath.`));
@@ -827,13 +828,36 @@
     return body;
   }
 
+  function renderConflictResult(payload) {
+    const body = el('div', 'result-record');
+    const warn = el('div', 'monitor-inline-banner p-change');
+    warn.appendChild(el('h4', null, 'Registries disagree'));
+    warn.appendChild(el('p', null,
+      'TinyVerify never merges disagreeing records. Each official record is shown unchanged; read both sources before relying on either.'));
+    body.appendChild(warn);
+
+    const wrap = el('div', 'conflict-list');
+    for (const record of payload.results || []) {
+      const card = el('div', 'conflict-record');
+      card.appendChild(primaryCard(record));
+      const footer = el('div', 'conflict-source');
+      footer.appendChild(sourceAnchor(record.source_url, 'Verify at source', 'card-link'));
+      card.appendChild(footer);
+      wrap.appendChild(card);
+    }
+    body.appendChild(wrap);
+    if (payload.notes && payload.notes.length) body.appendChild(notesList(payload.notes));
+    return body;
+  }
+
   function renderResult(payload) {
     clearNode(resultBodyEl);
     const q = state.currentQuery || {};
     resultTitleEl.textContent = `Result — ${payload.query?.subject || q.subject || q.number || ''}`;
 
     let renderer;
-    switch (payload.match_quality) {
+    if (payload.conflict) renderer = renderConflictResult;
+    else switch (payload.match_quality) {
       case 'unsupported': renderer = unsupportedCard; break;
       case 'multiple': renderer = renderMultipleResult; break;
       case 'no_match': renderer = renderNoMatchResult; break;
