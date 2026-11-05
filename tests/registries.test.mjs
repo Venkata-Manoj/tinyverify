@@ -4,9 +4,11 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseCompanyPage, parseSearchLinks } from '../lib/registries/companies-house.js';
-import { parseCslbPage } from '../lib/registries/cslb.js';
+import { parseComplaintDisclosure, parseCslbPage } from '../lib/registries/cslb.js';
 import { parseNpiResult } from '../lib/registries/npi.js';
 import { parseNzRecord, parseNzSearch } from '../lib/registries/nz-companies.js';
+import { isValidAbn, parseAbnPage, parseAbnSearch } from '../lib/registries/abn-au.js';
+import { parseDirectLicenseUrl, parseMqaPage, parseMqaSearch } from '../lib/registries/mqa-fl.js';
 import { coverageMatrix, normalizeJurisdiction, normalizeType, resolveRegistries } from '../lib/registry.js';
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
@@ -51,7 +53,17 @@ test('CSLB parser reads a revoked contractor licence', () => {
   assert.equal(parsed.fields.expire_date, '2017-05-28');
   assert.equal(parsed.fields.complaint_disclosure, 'on file');
   assert.ok(parsed.fields.classifications.some((c) => c.includes('C15')));
-  assert.match(parsed.disciplinary[0], /complaint disclosure/i);
+  assert.match(parsed.notes.join(' '), /complaint disclosure/i);
+});
+
+test('CSLB complaint disclosure parser reads a real arbitration record', () => {
+  const parsed = parseComplaintDisclosure(read('cslb-complaint.html'), { number: '738180' });
+  assert.equal(parsed.records.length, 1);
+  assert.equal(parsed.records[0].type, 'arbitration');
+  assert.equal(parsed.records[0].arbitration_number, 'A S 2016 000293');
+  assert.equal(parsed.records[0].date, '2017-05-28');
+  assert.equal(parsed.records[0].status, 'NON-COMPLIANCE - LICENSE REVOKED PER 7085.6');
+  assert.match(parsed.actions[0], /2017-05-28/);
 });
 
 test('CSLB parser reports a missing licence instead of inventing one', () => {
@@ -85,6 +97,10 @@ test('registry resolution accepts aliases and rejects unsupported pairs', () => 
   assert.deepEqual(resolveRegistries('builder', 'California').map((r) => r.meta.id), ['cslb-ca']);
   assert.deepEqual(resolveRegistries('doctor', 'USA').map((r) => r.meta.id), ['npi-us']);
   assert.deepEqual(resolveRegistries('company', 'New Zealand').map((r) => r.meta.id), ['nz-companies']);
+  assert.deepEqual(resolveRegistries('business', 'Australia').map((r) => r.meta.id), ['abn-au']);
+  assert.deepEqual(resolveRegistries('health', 'US-FL').map((r) => r.meta.id), ['npi-us', 'mqa-fl']);
+  assert.deepEqual(resolveRegistries('health', 'USA', { state: 'FL' }).map((r) => r.meta.id), ['npi-us', 'mqa-fl']);
+  assert.deepEqual(resolveRegistries('health', 'USA').map((r) => r.meta.id), ['npi-us']);
   assert.deepEqual(resolveRegistries('medical', 'NZ'), []);
   assert.equal(normalizeType('Healthcare'), 'health');
   assert.equal(normalizeJurisdiction('New Zealand'), 'NZ');
@@ -93,9 +109,75 @@ test('registry resolution accepts aliases and rejects unsupported pairs', () => 
 test('coverage matrix only lists combinations we can actually serve', () => {
   const matrix = coverageMatrix();
   assert.deepEqual(matrix.types.sort(), ['business', 'contractor', 'health']);
-  assert.deepEqual(matrix.jurisdictions.sort(), ['NZ', 'UK', 'US', 'US-CA']);
-  assert.equal(matrix.combinations.length, 4);
+  assert.deepEqual(matrix.jurisdictions.sort(), ['AU', 'NZ', 'UK', 'US', 'US-CA', 'US-FL']);
+  assert.deepEqual(
+    matrix.combinations.map((c) => `${c.licence_type}/${c.jurisdiction}`).sort(),
+    ['business/AU', 'business/NZ', 'business/UK', 'contractor/US-CA', 'health/US', 'health/US-FL'],
+  );
   for (const combo of matrix.combinations) assert.ok(combo.registries.length > 0);
+});
+
+test('ABN parser reads the official search results and detail page', () => {
+  const { total, results } = parseAbnSearch(read('abn-search.html'));
+  assert.equal(total, 146);
+  assert.ok(results.length >= 20);
+  const telstra = results.find((row) => row.abn === '33051775556');
+  assert.equal(telstra.name, 'TELSTRA');
+  assert.equal(telstra.status, 'active');
+  assert.equal(telstra.source_url, 'https://abr.business.gov.au/ABN/View?id=33051775556');
+
+  const detail = parseAbnPage(read('abn-detail.html'), { url: 'https://abr.business.gov.au/ABN/View?id=33051775556' });
+  assert.equal(detail.number, '33051775556');
+  assert.equal(detail.name, 'TELSTRA CORPORATION LIMITED');
+  assert.equal(detail.status, 'active');
+  assert.equal(detail.status_detail, 'Active from 01 Nov 1999');
+  assert.equal(detail.fields.abn, '33 051 775 556');
+  assert.equal(detail.fields.entity_type, 'Australian Public Company');
+  assert.equal(detail.fields.abn_last_updated, '2024-02-15');
+  assert.ok(detail.fields.business_names.includes('TELSTRA INFRACO'));
+  assert.ok(detail.fields.trading_names.includes('TELSTRA'));
+  assert.equal(parseAbnPage('<html>No record found</html>', {}), null);
+});
+
+test('ABN checksum rejects transposed or invented numbers', () => {
+  assert.equal(isValidAbn('33 051 775 556'), true);
+  assert.equal(isValidAbn('33051775557'), false);
+  assert.equal(isValidAbn('12345678901'), false);
+  assert.equal(isValidAbn('123'), false);
+});
+
+test('Florida MQA parsers read the search table and a physician detail page', () => {
+  const { total, results } = parseMqaSearch(read('mqa-search.html'));
+  assert.equal(total, 7);
+  assert.equal(results.length, 7);
+  const smith = results.find((row) => row.number === 'ME182088');
+  assert.equal(smith.name, 'Smith, John Horatio');
+  assert.equal(smith.profession, 'Medical Doctor');
+  assert.equal(smith.status, 'active');
+  assert.equal(smith.raw_status, 'Clear/Active');
+
+  const detail = parseMqaPage(read('mqa-detail.html'), {
+    url: 'https://mqa-internet.doh.state.fl.us/MQASearchServices/HealthCareProviders/LicenseVerification?LicInd=182095&ProCde=1501',
+  });
+  assert.equal(detail.number, 'ME182088');
+  assert.equal(detail.name, 'JOHN HORATIO SMITH II');
+  assert.equal(detail.status, 'active');
+  assert.equal(detail.status_detail, 'Clear/Active');
+  assert.equal(detail.expiry_date, '2028-01-31');
+  assert.equal(detail.issue_date, '2026-06-01');
+  assert.equal(detail.has_discipline, false);
+  assert.equal(detail.fields.profession, 'Medical Doctor');
+  assert.equal(detail.fields.discipline_on_file, 'no');
+});
+
+test('Florida MQA number search follows the exact-hit redirect', () => {
+  assert.equal(
+    parseDirectLicenseUrl('/MQASearchServices/HealthcareProviders/LicenseVerification?LicInd=182095&Procde=1501'),
+    'https://mqa-internet.doh.state.fl.us/MQASearchServices/HealthCareProviders/LicenseVerification?LicInd=182095&ProCde=1501',
+  );
+  assert.equal(parseDirectLicenseUrl('https://example.com/other?LicInd=1&ProCde=2'), null);
+  assert.equal(parseDirectLicenseUrl('/LicenseVerification?LicInd=182095'), null);
+  assert.equal(parseDirectLicenseUrl(null), null);
 });
 
 test('NZ search parser reads company numbers, names and statuses', () => {
