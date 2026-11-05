@@ -45,7 +45,7 @@ paths:
                   time: { type: string, format: date-time }
                   api_key_configured: { type: boolean }
                   demo: { type: boolean }
-                  storage: { type: string, enum: [file, redis] }
+                  storage: { type: string, enum: [file, kv] }
                   registries:
                     type: array
                     items: { type: string }
@@ -110,8 +110,8 @@ paths:
         `number` without a `subject` is an exact identity lookup. A `number`
         with a subject is checked for a name/number mismatch.
 
-        `refresh: true` bypasses the cache only for a caller presenting
-        `X-TinyVerify-Owner` or the admin key.
+        `refresh: true` bypasses the cache only for a caller presenting a
+        valid admin key. All other callers receive the cached response.
       parameters:
         - $ref: '#/components/parameters/OwnerToken'
         - $ref: '#/components/parameters/AdminKey'
@@ -354,10 +354,11 @@ paths:
       summary: TinyFish Monitor callback
       description: |
         Requires a shared secret in production. Accepted proof is `?token=<secret>`
-        or HMAC-SHA256 of `<timestamp>.<raw body>` in `X-TinyFish-Signature`
-        with `X-TinyFish-Timestamp` within ±300 seconds. Payload hashes are
-        remembered for five minutes so replays are ignored. The payload is never
-        trusted as the source of truth: the watch is re-read and diffed.
+        in the callback URL or HMAC-SHA256 of `<timestamp>.<raw body>` in
+        `X-TinyFish-Signature` with `X-TinyFish-Timestamp` within ±300 seconds.
+        A body-only signature is rejected. The replay claim is atomic and lasts
+        ten minutes; a failed re-check releases it. The payload is never trusted
+        as the source of truth: the watch is re-read and diffed.
       parameters:
         - name: token
           in: query
@@ -510,7 +511,7 @@ components:
           description: Health specialty/taxonomy filter.
         refresh:
           type: boolean
-          description: Bypass the 10-minute cache. Honoured only for an owner or admin caller.
+          description: Bypass the 10-minute cache. Honoured only for a caller presenting a valid admin key.
       anyOf:
         - required: [subject]
         - required: [number]
@@ -530,6 +531,11 @@ components:
             city: { type: string }
             taxonomy: { type: string }
         match_quality: { $ref: '#/components/schemas/MatchQuality' }
+        status:
+          oneOf:
+            - { $ref: '#/components/schemas/Status' }
+            - { type: 'null' }
+          description: Set to `unknown` only when `conflict` is true; otherwise null.
         conflict:
           type: boolean
           description: Present when registries disagree; `primary` is null and each record is kept.

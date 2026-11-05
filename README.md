@@ -209,7 +209,7 @@ Every successful response includes `checked_at` and, per record, `source_url`. R
 - A watch is created with a random browser **owner token** (`X-TinyVerify-Owner`); the server stores only its SHA-256 hash.
 - Creation also returns a random per-watch **`manage_token`** exactly once. Only its SHA-256 hash is stored. `GET`, `check` and `DELETE` require it as `X-TinyVerify-Watch-Token`; knowing a monitor id is not enough.
 - `GET /api/monitors` returns only watches owned by the caller, or all watches when `X-TinyVerify-Admin` matches `TINYVERIFY_ADMIN_KEY`.
-- Watches created before per-watch tokens still fall back to the owner hash, so existing users are not locked out.
+- A watch created before per-watch tokens still accepts its owner-scoped credential. A watch with neither credential is denied with `401 WATCH_TOKEN_REQUIRED`; there is no anonymous fallback.
 
 ### Rate limits and abuse controls
 
@@ -221,7 +221,7 @@ Every successful response includes `checked_at` and, per record, `source_url`. R
 | TinyFish webhook | 120 / minute per client |
 | CSLB Agent fallback | 3 runs / hour, 2 concurrent |
 
-`refresh: true` bypasses the short cache and costs an upstream read, so it is honoured only for a caller with an owner or admin credential. Anonymous refresh requests receive the normal cached response.
+`refresh: true` bypasses the short cache and costs an upstream read, so it is honoured only for a caller presenting a valid `X-TinyVerify-Admin` key. Every other request receives the normal cached response.
 
 Request bodies are capped at 64 KB (256 KB for webhooks). Security headers include a strict CSP, `frame-ancestors 'none'`, `nosniff`, `no-referrer` and HSTS.
 
@@ -229,10 +229,10 @@ Request bodies are capped at 64 KB (256 KB for webhooks). Security headers inclu
 
 In production, `TINYVERIFY_WEBHOOK_SECRET` is required; without it the webhook returns `503 WEBHOOK_NOT_CONFIGURED`. Accepted proof:
 
-- `?token=<secret>` (legacy), or
-- HMAC-SHA256 of `<timestamp>.<raw body>` (or the raw body) in `X-TinyFish-Signature`, with `X-TinyFish-Timestamp` within **±300 seconds**.
+- `?token=<secret>` in the callback URL, or
+- HMAC-SHA256 of `<timestamp>.<raw body>` in `X-TinyFish-Signature`, with `X-TinyFish-Timestamp` within **±300 seconds**.
 
-Payload hashes are remembered for five minutes, so a replay is acknowledged and ignored. The webhook never trusts the payload as the source of truth: it re-reads the official record through TinyVerify's pipeline before creating an event.
+The URL token exists because TinyFish Monitor scheduled webhooks are not signed; a monitor's stored URL cannot be read back, so treat it as a secret. The HMAC path accepts only the timestamped form — a body-only signature is rejected. The replay claim is atomic (`SET NX EX` in Redis/KV, in-process fallback) and lasts 10 minutes; a failed re-check releases the claim so TinyFish's retry can proceed. The webhook never trusts the payload as the source of truth: it re-reads the official record through TinyVerify's pipeline before creating an event.
 
 ---
 
@@ -243,7 +243,7 @@ Requires Node 22+. Zero runtime dependencies.
 ```bash
 cp .env.example .env          # add TINYFISH_API_KEY
 npm run dev                   # http://localhost:3000
-npm test                      # 58 unit tests, no network
+npm test                      # 88 unit tests, no network
 npm run test:live             # 12 real registry checks (LIVE=1)
 npm run check                 # syntax check of entry points
 ```

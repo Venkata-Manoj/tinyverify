@@ -113,7 +113,7 @@ A registry string that matches no rule is `unknown`, never a guess.
 - TTL: 10 minutes (`TINYVERIFY_CACHE_TTL`).
 - Cache key: subject + type + jurisdiction + number + state + city + taxonomy.
 - A cached response is marked `cached: true`, keeps the **original** `source_url` and `checked_at`, reports `cache_age_seconds`, and adds a note saying it was served from cache.
-- `refresh: true` bypasses and replaces the cache entry. Because it costs an upstream read, the API honours it only for a caller with an owner token or the admin key; anonymous callers get the normal cached response.
+- `refresh: true` bypasses and replaces the cache entry. Because it costs an upstream read, the API honours it only for a caller presenting a valid admin key; every other caller gets the normal cached response.
 - Monitor checks always refresh.
 
 ## 6. Watches and change events
@@ -142,7 +142,7 @@ The demo simulator (`POST /api/monitors/:id/simulate`) is available only when `T
 - Creating a watch returns a random **`manage_token`** exactly once. The server stores only its SHA-256 hash. `GET`, `check` and `DELETE` require it as `X-TinyVerify-Watch-Token`; possession of a monitor id is not enough.
 - A wrong token returns `404` with the same message as a missing watch, so ids cannot be probed.
 - `GET /api/monitors` returns only the caller's watches. With `X-TinyVerify-Admin: <TINYVERIFY_ADMIN_KEY>` it returns all watches.
-- Legacy watches without a `manage_hash` fall back to the owner hash.
+- A legacy watch without a `manage_hash` falls back to the owner hash. A watch with neither credential is denied with `401 WATCH_TOKEN_REQUIRED`.
 
 ## 8. Manual live matrix
 
