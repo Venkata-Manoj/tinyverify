@@ -12,6 +12,7 @@ process.env.TINYVERIFY_ALLOW_AGENT = 'false';
 
 const { createWatch, checkWatch, getWatch, listWatches, deleteWatch, simulateWatch, handleTinyfishWebhook } = await import('../lib/monitors.js');
 const { insertMonitor, removeMonitor } = await import('../lib/store.js');
+const { config } = await import('../lib/config.js');
 
 function record(overrides = {}) {
   return makeRecord({
@@ -43,6 +44,33 @@ let manageToken;
 
 after(async () => {
   await rm(dataDir, { recursive: true, force: true });
+});
+
+test('a new watch sends TinyFish a webhook URL carrying the deployment token', async () => {
+  const previousPublicUrl = process.env.TINYVERIFY_PUBLIC_URL;
+  const previousSecret = config.webhookSecret;
+  process.env.TINYVERIFY_PUBLIC_URL = 'https://tinyverify.example';
+  config.webhookSecret = 'hook-secret';
+  let seen = null;
+  let created = null;
+  try {
+    created = await createWatch(
+      { subject: 'Tesco PLC', licence_type: 'business', jurisdiction: 'UK' },
+      {
+        verifyFn: async () => verification(record()),
+        createMonitorFn: async (options) => {
+          seen = options;
+          return { monitor: { id: 'tf_hook_token_1', status: 'active' } };
+        },
+      },
+    );
+    assert.equal(seen.webhookUrl, 'https://tinyverify.example/api/webhooks/tinyfish?token=hook-secret');
+  } finally {
+    if (created) await deleteWatch(created.monitor.id, { manageToken: created.manage_token, deleteMonitorFn: fakeDeleteMonitor });
+    if (previousPublicUrl === undefined) delete process.env.TINYVERIFY_PUBLIC_URL;
+    else process.env.TINYVERIFY_PUBLIC_URL = previousPublicUrl;
+    config.webhookSecret = previousSecret;
+  }
 });
 
 test('createWatch stores a baseline snapshot and the TinyFish monitor id', async () => {
