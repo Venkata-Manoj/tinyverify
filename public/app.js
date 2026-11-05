@@ -94,7 +94,16 @@
     return null;
   }
 
-  const STATUS_LABELS = { active: 'Active', expired: 'Expired', suspended: 'Suspended', revoked: 'Revoked', unknown: 'Unknown' };
+  const STATUS_LABELS = {
+    active: 'Active',
+    expired: 'Expired',
+    suspended: 'Suspended',
+    revoked: 'Revoked',
+    dissolved: 'Dissolved',
+    in_liquidation: 'In liquidation',
+    inactive: 'Inactive',
+    unknown: 'Unknown'
+  };
 
   /* ---------------- api ---------------- */
 
@@ -124,12 +133,47 @@
 
   const OWNER = ownerToken();
 
+  /* The per-watch management token is returned exactly once, when the watch is
+     created. It is kept per monitor id so this browser can read, re-check and
+     delete the watch later. Clearing site data loses it by design. */
+  const WATCH_TOKENS_KEY = 'tinyverify.watchTokens.v1';
+
+  function readWatchTokens() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(WATCH_TOKENS_KEY) || '{}');
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function saveWatchToken(id, token) {
+    if (!id || !token) return;
+    try {
+      const all = readWatchTokens();
+      all[id] = String(token);
+      localStorage.setItem(WATCH_TOKENS_KEY, JSON.stringify(all));
+    } catch { /* storage unavailable — the watch still lists, but cannot be managed */ }
+  }
+
+  function watchTokenFor(id) {
+    return readWatchTokens()[id] || null;
+  }
+
+  function forgetWatchToken(id) {
+    try {
+      const all = readWatchTokens();
+      delete all[id];
+      localStorage.setItem(WATCH_TOKENS_KEY, JSON.stringify(all));
+    } catch { /* nothing to forget */ }
+  }
+
   async function readJsonBody(res) {
     try { return await res.json(); } catch { return null; }
   }
 
   /* Wrapper supporting a caller AbortController plus a hard 180s timeout. */
-  async function apiFetch(path, { method = 'GET', body, signal } = {}) {
+  async function apiFetch(path, { method = 'GET', body, signal, watchToken } = {}) {
     const controller = new AbortController();
     const forwardAbort = () => controller.abort();
     if (signal) {
@@ -141,6 +185,7 @@
     try {
       const headers = Object.assign({ 'Accept': 'application/json' }, body ? { 'Content-Type': 'application/json' } : null);
       if (OWNER) headers['X-TinyVerify-Owner'] = OWNER;
+      if (watchToken) headers['X-TinyVerify-Watch-Token'] = watchToken;
       res = await fetch(path, {
         method,
         headers,
@@ -169,7 +214,8 @@
   const state = {
     modes: [],            // supported {type, jurisdiction, registry} combinations
     currentQuery: null,   // query object behind the current result
-    verifyAbort: null     // AbortController for the in-flight verify
+    verifyAbort: null,    // AbortController for the in-flight verify
+    demo: false           // server exposes the demo simulator
   };
 
   /* ---------------- elements ---------------- */
@@ -179,6 +225,9 @@
   const typeSelect = $('licence-type');
   const jurisdictionSelect = $('jurisdiction');
   const numberInput = $('number');
+  const stateInput = $('state');
+  const cityInput = $('city');
+  const taxonomyInput = $('taxonomy');
   const submitButton = $('submit-button');
   const loadingEl = $('loading');
   const stagesEl = $('stages');
@@ -236,6 +285,15 @@
       if ((data.jurisdictions || []).length) fillSelect(jurisdictionSelect, data.jurisdictions, 'UK');
     } catch {
       /* fallback options were populated at init */
+    }
+  }
+
+  async function loadHealth() {
+    try {
+      const data = await apiFetch('/api/health');
+      state.demo = Boolean(data && data.demo);
+    } catch {
+      state.demo = false;
     }
   }
 
@@ -308,6 +366,12 @@
     };
     if (subject) query.subject = subject;
     if (number) query.number = number;
+    const usState = stateInput.disabled ? '' : stateInput.value.trim().toUpperCase();
+    const city = cityInput.disabled ? '' : cityInput.value.trim();
+    const taxonomy = taxonomyInput.disabled ? '' : taxonomyInput.value.trim();
+    if (usState) query.state = usState;
+    if (city) query.city = city;
+    if (taxonomy) query.taxonomy = taxonomy;
     return query;
   }
 
@@ -355,6 +419,7 @@
   const MQ_MESSAGES = {
     exact: 'Exact match',
     close: 'Close match — verify the name',
+    mismatch: 'Name and number do not match — check before relying on this',
     multiple: 'Multiple matches — pick the right record',
     no_match: 'No match found',
     unsupported: 'Jurisdiction not supported yet'
@@ -462,9 +527,21 @@
     const banner = el('div', 'status-banner');
     banner.appendChild(statusPill(record.status));
     banner.appendChild(matchBanner(record.match_quality || 'exact'));
+    if (Number(record.total_found) > 1) {
+      banner.appendChild(el('span', 'count-badge',
+        `${record.total_found} records at this registry; one is shown`));
+    }
     const cached = cachedNote(record);
     if (cached) banner.appendChild(cached);
     wrap.appendChild(banner);
+
+    if (record.name_number_mismatch) {
+      const warn = el('div', 'mismatch-warning');
+      warn.appendChild(el('strong', null, 'Name and number do not describe the same record'));
+      warn.appendChild(el('p', null,
+        'The record was returned because the registration number matched, not the name. Confirm the number at the source before relying on it.'));
+      wrap.appendChild(warn);
+    }
 
     const grid = el('div', 'fields-grid');
 
@@ -493,13 +570,39 @@
     grid.appendChild(fieldCell('Status detail', [textOrDash(record.status_detail)]));
     grid.appendChild(fieldCell('Registry', [textOrDash(record.registry_name || record.source_name)]));
 
+    if (record.status_bounty && record.status_bounty !== record.status) {
+      grid.appendChild(fieldCell('Normalised status', [
+        el('span', 'mono', String(record.status_bounty))
+      ]));
+    }
+
     const discCell = el('div', 'cell cell-full');
     discCell.appendChild(el('span', 'cell-label', 'Disciplinary actions'));
-    const discList = el('ul', 'actions-list');
-    (record.disciplinary_actions && record.disciplinary_actions.length
-      ? record.disciplinary_actions : ['—']
-    ).forEach((item) => discList.appendChild(el('li', null, String(item))));
-    discCell.appendChild(discList);
+    const records = Array.isArray(record.disciplinary_records) ? record.disciplinary_records : [];
+    if (records.length) {
+      const recList = el('ul', 'actions-list');
+      for (const item of records) {
+        const bits = [];
+        if (item.date) bits.push(item.date);
+        if (item.type) bits.push(item.type);
+        if (item.status) bits.push(item.status);
+        const line = el('li');
+        line.appendChild(el('span', null, item.description || bits.join(' · ') || 'Disciplinary record'));
+        if (item.description && bits.length) line.appendChild(el('span', 'card-meta', ` — ${bits.join(' · ')}`));
+        if (item.source_url) {
+          line.appendChild(document.createTextNode(' '));
+          line.appendChild(sourceAnchor(item.source_url, 'source', 'card-link'));
+        }
+        recList.appendChild(line);
+      }
+      discCell.appendChild(recList);
+    } else {
+      const discList = el('ul', 'actions-list');
+      (record.disciplinary_actions && record.disciplinary_actions.length
+        ? record.disciplinary_actions : ['—']
+      ).forEach((item) => discList.appendChild(el('li', null, String(item))));
+      discCell.appendChild(discList);
+    }
     grid.appendChild(discCell);
 
     wrap.appendChild(grid);
@@ -747,6 +850,17 @@
       resultBodyEl.appendChild(warn);
     }
 
+    if (payload.name_number_mismatch && !payload.primary) {
+      const warn = el('div', 'monitor-inline-banner mismatch-warning');
+      warn.appendChild(el('h4', null, 'Name and number do not describe the same record'));
+      const check = payload.name_number_check;
+      warn.appendChild(el('p', null,
+        check
+          ? `You entered “${check.provided_name || 'a name'}” but the number belongs to “${check.official_name}”. Confirm the number before relying on any record here.`
+          : 'At least one registry returned a record whose name does not match the name you entered. Confirm the number before relying on it.'));
+      resultBodyEl.appendChild(warn);
+    }
+
     resultBodyEl.appendChild(renderer(payload));
 
     if (payload.duration_ms !== undefined) {
@@ -765,8 +879,11 @@
   /* ---------------- monitors ---------------- */
 
   function eventLine(event) {
-    const li = el('li');
-    li.appendChild(el('div', 'kv-line', event.summary || 'Change recorded'));
+    const li = el('li', event.simulated ? 'timeline-demo' : null);
+    const head = el('div', 'kv-line');
+    if (event.simulated) head.appendChild(el('span', 'demo-badge', 'Demo'));
+    head.appendChild(document.createTextNode(event.summary || 'Change recorded'));
+    li.appendChild(head);
     const changed = event.changed_fields || [];
     if (changed.length && event.old && event.new) {
       for (const key of changed) {
@@ -778,6 +895,7 @@
     }
     const at = fmtDateTime(event.checked_at);
     if (at) li.appendChild(el('div', 'card-meta', `Checked ${at}`));
+    if (event.detected_by) li.appendChild(el('div', 'card-meta', event.detected_by));
     if (event.source_url) li.appendChild(sourceAnchor(event.source_url, 'View source', 'card-link'));
     return li;
   }
@@ -787,6 +905,9 @@
     const monitor = detail.monitor;
     container.appendChild(el('p', 'since-row',
       `Watching since ${fmtDateTime(monitor.created_at) || '—'} · last checked ${fmtDateTime(monitor.last_checked_at) || '—'}`));
+    if (monitor.last_check && monitor.last_check.ok === false && monitor.last_check.note) {
+      container.appendChild(el('p', 'loading-note load-note--warn', monitor.last_check.note));
+    }
     container.appendChild(el('p', 'section-label', 'Change log'));
     if (!detail.events || !detail.events.length) {
       container.appendChild(el('p', 'card-meta', 'No changes recorded yet.'));
@@ -797,44 +918,79 @@
     }
   }
 
+  function watchAccessHint(err) {
+    if (err && (err.code === 'WATCH_TOKEN_REQUIRED' || err.code === 'NOT_FOUND')) {
+      return 'This watch needs the management token that this browser stored when the watch was created. If site data was cleared, create a new watch.';
+    }
+    return err ? err.message : 'The request failed.';
+  }
+
   async function loadMonitorDetail(id, container) {
     clearNode(container);
     container.appendChild(el('p', 'loading-note', 'Loading history…'));
     try {
-      const detail = await apiFetch(`/api/monitors/${encodeURIComponent(id)}`);
+      const detail = await apiFetch(`/api/monitors/${encodeURIComponent(id)}`, { watchToken: watchTokenFor(id) });
       renderMonitorDetail(detail, container);
     } catch (err) {
       clearNode(container);
       container.appendChild(el('p', 'loading-note load-note--warn',
-        `History could not be loaded — ${err.message}`));
+        `History could not be loaded — ${watchAccessHint(err)}`));
+    }
+  }
+
+  function showCheckOutcome(bannerHost, data) {
+    clearNode(bannerHost);
+    if (data.event) {
+      const box = el('div', `monitor-inline-banner ${data.event.simulated ? 'p-demo' : 'p-change'}`);
+      box.appendChild(el('h4', null, data.event.simulated ? 'Simulated change (demo only)' : 'Change detected'));
+      box.appendChild(eventLine(data.event));
+      if (data.event.simulated) {
+        box.appendChild(el('p', 'card-meta',
+          'The simulator only writes this event so the change log can be demonstrated. The live snapshot was not modified.'));
+      }
+      bannerHost.appendChild(box);
+    } else {
+      bannerHost.appendChild(el('div', 'monitor-inline-banner', data.note || 'No change since the last check.'));
     }
   }
 
   async function checkMonitor(id, bannerHost, onChecked) {
     clearNode(bannerHost);
-    bannerHost.appendChild(el('p', 'loading-note', 'Checking now…'));
+    bannerHost.appendChild(el('p', 'loading-note', 'Checking the live source…'));
     try {
-      const data = await apiFetch(`/api/monitors/${encodeURIComponent(id)}/check`, { method: 'POST' });
-      clearNode(bannerHost);
-      if (data.event) {
-        const box = el('div', 'monitor-inline-banner p-change');
-        box.appendChild(el('h4', null, 'Change detected'));
-        box.appendChild(eventLine(data.event));
-        bannerHost.appendChild(box);
-      } else {
-        bannerHost.appendChild(el('div', 'monitor-inline-banner', 'No change since the last check.'));
-      }
+      const data = await apiFetch(`/api/monitors/${encodeURIComponent(id)}/check`, {
+        method: 'POST',
+        watchToken: watchTokenFor(id)
+      });
+      showCheckOutcome(bannerHost, data);
       if (onChecked) onChecked(data.monitor, data.event);
     } catch (err) {
       clearNode(bannerHost);
-      bannerHost.appendChild(el('p', 'loading-note load-note--warn', `Check failed — ${err.message}`));
+      bannerHost.appendChild(el('p', 'loading-note load-note--warn', `Check failed — ${watchAccessHint(err)}`));
     }
   }
 
-  function monitorCard(monitor, opts) {
-    const inline = Boolean(opts && opts.inline);
+  async function simulateMonitor(id, bannerHost, onChecked) {
+    clearNode(bannerHost);
+    bannerHost.appendChild(el('p', 'loading-note', 'Appending a labelled demo event…'));
+    try {
+      const data = await apiFetch(`/api/monitors/${encodeURIComponent(id)}/simulate`, {
+        method: 'POST',
+        body: {},
+        watchToken: watchTokenFor(id)
+      });
+      showCheckOutcome(bannerHost, data);
+      if (onChecked) onChecked(data.monitor, data.event);
+    } catch (err) {
+      clearNode(bannerHost);
+      bannerHost.appendChild(el('p', 'loading-note load-note--warn', `Simulation failed — ${watchAccessHint(err)}`));
+    }
+  }
+
+  function monitorCard(monitor) {
     const card = el('article', 'panel monitor-card');
     card.dataset.monitorId = monitor.id;
+    const hasToken = Boolean(watchTokenFor(monitor.id));
 
     let pillNode = statusPill((monitor.snapshot && monitor.snapshot.status) || 'unknown');
 
@@ -857,6 +1013,13 @@
     if (monitor.source_url) {
       card.appendChild(sourceAnchor(monitor.source_url, 'Verify at the source', 'card-link'));
     }
+    if (monitor.manage_token_required && !hasToken) {
+      card.appendChild(el('p', 'loading-note load-note--warn',
+        'Management token missing in this browser — this watch is read-only here.'));
+    }
+    if (monitor.last_check && monitor.last_check.ok === false && monitor.last_check.note) {
+      card.appendChild(el('p', 'loading-note load-note--warn', monitor.last_check.note));
+    }
 
     const bannerHost = el('div');
     card.appendChild(bannerHost);
@@ -878,6 +1041,7 @@
     });
 
     function updateFrom(updated) {
+      if (!updated) return;
       const fresh = statusPill((updated.snapshot && updated.snapshot.status) || 'unknown');
       pillNode.replaceWith(fresh);
       pillNode = fresh;
@@ -885,24 +1049,40 @@
 
     const checkBtn = el('button', 'btn-outline', 'Check now', { type: 'button' });
     checkBtn.addEventListener('click', () => {
+      checkBtn.disabled = true;
+      checkBtn.textContent = 'Checking…';
       checkMonitor(monitor.id, bannerHost, (updated) => {
-        if (updated) updateFrom(updated);
+        updateFrom(updated);
         if (open && detail) loadMonitorDetail(monitor.id, detail);
+      }).finally(() => {
+        checkBtn.disabled = false;
+        checkBtn.textContent = 'Check now';
       });
     });
 
     const deleteBtn = el('button', 'link-delete', 'Delete', { type: 'button' });
-    deleteBtn.addEventListener('click', () => deleteMonitor(monitor.id));
+    deleteBtn.addEventListener('click', () => deleteMonitor(monitor.id, deleteBtn));
 
     const btns = el('div', 'monitor-btns');
     btns.appendChild(checkBtn);
     btns.appendChild(historyBtn);
+    if (state.demo) {
+      const demoBtn = el('button', 'btn-outline demo-btn', 'Simulate change (demo)', { type: 'button' });
+      demoBtn.addEventListener('click', () => {
+        demoBtn.disabled = true;
+        demoBtn.textContent = 'Simulating…';
+        simulateMonitor(monitor.id, bannerHost, (updated) => {
+          updateFrom(updated);
+          if (open && detail) loadMonitorDetail(monitor.id, detail);
+        }).finally(() => {
+          demoBtn.disabled = false;
+          demoBtn.textContent = 'Simulate change (demo)';
+        });
+      });
+      btns.appendChild(demoBtn);
+    }
     btns.appendChild(deleteBtn);
     head.appendChild(btns);
-
-    if (inline) {
-      card.appendChild(el('p', 'card-meta', 'This record is now watched — it joins the list below.'));
-    }
     return card;
   }
 
@@ -918,11 +1098,18 @@
         jurisdiction: query.jurisdiction
       };
       if (query.number) body.number = query.number;
+      if (query.state) body.state = query.state;
+      if (query.city) body.city = query.city;
+      if (query.taxonomy) body.taxonomy = query.taxonomy;
       const data = await apiFetch('/api/monitors', { method: 'POST', body });
+      if (data.manage_token) saveWatchToken(data.monitor.id, data.manage_token);
       clearNode(panel);
-      panel.appendChild(el('h3', 'aside-title', 'Watched'));
-      panel.appendChild(monitorCard(data.monitor, { inline: false }));
-      refreshMonitors();
+      panel.appendChild(el('h3', 'aside-title', 'Watching'));
+      panel.appendChild(el('p', 'aside-desc',
+        `“${query.subject}” is now watched. It appears once in the watched-records list below and is re-checked daily.`));
+      panel.appendChild(el('p', 'watch-note',
+        'This browser holds the watch management token. Clearing site data removes the ability to re-check or delete it; create a new watch if that happens.'));
+      await refreshMonitors();
     } catch (err) {
       button.disabled = false;
       button.textContent = 'Watch this record';
@@ -931,17 +1118,35 @@
     }
   }
 
-  async function deleteMonitor(id) {
+  async function deleteMonitor(id, button) {
     if (!window.confirm('Delete this watch? The record will no longer be checked for changes.')) return;
-    try {
-      await apiFetch(`/api/monitors/${encodeURIComponent(id)}`, { method: 'DELETE' });
-    } catch (err) {
-      showError(`Could not delete the watch — ${err.message}`, err.code);
+    if (button) {
+      button.disabled = true;
+      button.textContent = 'Deleting…';
     }
-    refreshMonitors();
+    try {
+      await apiFetch(`/api/monitors/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        watchToken: watchTokenFor(id)
+      });
+      forgetWatchToken(id);
+    } catch (err) {
+      showError(`Could not delete the watch — ${watchAccessHint(err)}`, err.code);
+      if (button) {
+        button.disabled = false;
+        button.textContent = 'Delete';
+      }
+      return;
+    }
+    await refreshMonitors();
   }
 
   async function refreshMonitors() {
+    if (monitorsEl.hidden) {
+      clearNode(monitorsBodyEl);
+      monitorsBodyEl.appendChild(el('p', 'loading-note', 'Loading watched records…'));
+      monitorsEl.hidden = false;
+    }
     let monitors = [];
     try {
       const data = await apiFetch('/api/monitors');
@@ -950,7 +1155,6 @@
       clearNode(monitorsBodyEl);
       monitorsBodyEl.appendChild(el('p', 'loading-note load-note--warn',
         `Watched records could not be loaded — ${err.message}`));
-      monitorsEl.hidden = false;
       return;
     }
     clearNode(monitorsBodyEl);
@@ -963,10 +1167,17 @@
     } else {
       for (const monitor of monitors) monitorsBodyEl.appendChild(monitorCard(monitor));
     }
-    monitorsEl.hidden = false;
   }
 
   /* ---------------- form wiring ---------------- */
+
+  function syncFilterState() {
+    const health = typeSelect.value === 'health';
+    for (const input of [stateInput, cityInput, taxonomyInput]) {
+      input.disabled = !health;
+      input.closest('.field').classList.toggle('field-disabled', !health);
+    }
+  }
 
   function bindEvents() {
     formEl.addEventListener('submit', (e) => {
@@ -975,12 +1186,18 @@
       if (query) runVerify(query);
     });
 
+    typeSelect.addEventListener('change', syncFilterState);
+
     for (const chip of document.querySelectorAll('.sample-chip')) {
       chip.addEventListener('click', () => {
         subjectInput.value = chip.dataset.subject;
         typeSelect.value = chip.dataset.type;
         jurisdictionSelect.value = chip.dataset.jurisdiction;
         numberInput.value = chip.dataset.number || '';
+        stateInput.value = '';
+        cityInput.value = '';
+        taxonomyInput.value = '';
+        syncFilterState();
         const query = readQuery();
         if (query) runVerify(query);
       });
@@ -992,9 +1209,11 @@
   async function init() {
     fillSelect(typeSelect, FALLBACK_TYPES, 'business');
     fillSelect(jurisdictionSelect, FALLBACK_JURISDICTIONS, 'UK');
+    syncFilterState();
     bindEvents();
     refreshMonitors();
     loadRegistries();
+    loadHealth();
   }
 
   init();

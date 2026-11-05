@@ -37,10 +37,24 @@
             </div>
           </div>
           <details class="field-details">
-            <summary>Add a registration number</summary>
+            <summary>Add a registration number or health filters</summary>
             <div class="field">
               <label for="number">Registration number (optional)</label>
               <input id="number" name="number" type="text" autocomplete="off" spellcheck="false" inputmode="text">
+            </div>
+            <div class="field-row field-row-3">
+              <div class="field">
+                <label for="state">US state (health only)</label>
+                <input id="state" name="state" type="text" autocomplete="off" spellcheck="false" maxlength="2" placeholder="e.g. FL">
+              </div>
+              <div class="field">
+                <label for="city">City (health only)</label>
+                <input id="city" name="city" type="text" autocomplete="off" spellcheck="false" placeholder="e.g. Miami">
+              </div>
+              <div class="field">
+                <label for="taxonomy">Specialty / taxonomy (health only)</label>
+                <input id="taxonomy" name="taxonomy" type="text" autocomplete="off" spellcheck="false" placeholder="e.g. Internal Medicine">
+              </div>
             </div>
           </details>
           <button type="submit" class="btn-primary" id="submit-button">Verify now</button>
@@ -50,6 +64,8 @@
           <button type="button" class="chip sample-chip" data-subject="Tesco PLC" data-type="business" data-jurisdiction="UK" data-number="00445790">Tesco PLC · UK business</button>
           <button type="button" class="chip sample-chip" data-subject="DONE RIGHT DISCOUNT FLOORING" data-type="contractor" data-jurisdiction="US-CA" data-number="738180">DONE RIGHT DISCOUNT FLOORING · CA contractor</button>
           <button type="button" class="chip sample-chip" data-subject="Air New Zealand Limited" data-type="business" data-jurisdiction="NZ" data-number="104799">Air New Zealand Limited · NZ business</button>
+          <button type="button" class="chip sample-chip" data-subject="TELSTRA CORPORATION LIMITED" data-type="business" data-jurisdiction="AU" data-number="33051775556">Telstra · AU business</button>
+          <button type="button" class="chip sample-chip" data-subject="JOHN HORATIO SMITH II" data-type="health" data-jurisdiction="US-FL" data-number="ME182088">Florida physician · US-FL</button>
         </div>
       </div>
     </section>
