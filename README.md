@@ -243,7 +243,7 @@ Requires Node 22+. Zero runtime dependencies.
 ```bash
 cp .env.example .env          # add TINYFISH_API_KEY
 npm run dev                   # http://localhost:3000
-npm test                      # 88 unit tests, no network
+npm test                      # 89 unit tests, no network
 npm run test:live             # 12 real registry checks (LIVE=1)
 npm run check                 # syntax check of entry points
 ```
