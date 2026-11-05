@@ -1,6 +1,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
+import { createHmac } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,7 +11,7 @@ process.env.TINYVERIFY_DATA_DIR = dataDir;
 process.env.TINYVERIFY_LOG = '0';
 process.env.TINYVERIFY_WEBHOOK_SECRET = 'test-webhook-secret';
 
-const { handleRequest } = await import('../lib/router.js');
+const { handleRequest, refreshAllowed } = await import('../lib/router.js');
 
 let server;
 let base;
@@ -36,6 +37,18 @@ async function call(path, options = {}) {
   let data;
   try { data = JSON.parse(text); } catch { data = text; }
   return { status: res.status, headers: res.headers, data };
+}
+
+function signedPayload(payload, { timestamp = Math.floor(Date.now() / 1000), secret = 'test-webhook-secret' } = {}) {
+  const raw = JSON.stringify(payload);
+  const signature = createHmac('sha256', secret).update(`${timestamp}.${raw}`).digest('hex');
+  return {
+    body: raw,
+    headers: {
+      'x-tinyfish-signature': signature,
+      'x-tinyfish-timestamp': String(timestamp),
+    },
+  };
 }
 
 test('GET /api/health reports configuration without leaking the key', async () => {
@@ -104,6 +117,71 @@ test('GET /api/monitors starts empty and the webhook verifies its token', async 
   });
   assert.equal(hook.status, 200);
   assert.equal(hook.data.ignored, true);
+});
+
+test('webhook accepts a timestamped HMAC and rejects body-only signatures', async () => {
+  const payload = { fetch_monitor_id: 'not-ours', outcome: 'unchanged' };
+  const signed = signedPayload(payload);
+  const accepted = await call('/api/webhooks/tinyfish', {
+    method: 'POST',
+    headers: signed.headers,
+    body: signed.body,
+  });
+  assert.equal(accepted.status, 200);
+  assert.equal(accepted.data.ignored, true);
+
+  const raw = JSON.stringify(payload);
+  const bodyOnly = createHmac('sha256', 'test-webhook-secret').update(raw).digest('hex');
+  const rejected = await call('/api/webhooks/tinyfish', {
+    method: 'POST',
+    headers: { 'x-tinyfish-signature': bodyOnly, 'x-tinyfish-timestamp': String(Math.floor(Date.now() / 1000)) },
+    body: raw,
+  });
+  assert.equal(rejected.status, 401);
+  assert.equal(rejected.data.error.code, 'BAD_SIGNATURE');
+});
+
+test('webhook rejects a stale timestamp and duplicate payloads', async () => {
+  const payload = { fetch_monitor_id: 'not-ours', outcome: 'replay-check-unique' };
+  const stale = signedPayload(payload, { timestamp: Math.floor(Date.now() / 1000) - 3600 });
+  const rejected = await call('/api/webhooks/tinyfish', { method: 'POST', headers: stale.headers, body: stale.body });
+  assert.equal(rejected.status, 401);
+
+  const fresh = signedPayload(payload);
+  const first = await call('/api/webhooks/tinyfish', { method: 'POST', headers: fresh.headers, body: fresh.body });
+  assert.equal(first.status, 200);
+  assert.equal(first.data.ignored, true);
+  const replay = await call('/api/webhooks/tinyfish', { method: 'POST', headers: fresh.headers, body: fresh.body });
+  assert.equal(replay.status, 200);
+  assert.match(replay.data.reason, /Duplicate webhook payload/i);
+});
+
+test('the webhook token is never written to the access log', async () => {
+  const previousLog = process.env.TINYVERIFY_LOG;
+  const previousLogFn = console.log;
+  const lines = [];
+  process.env.TINYVERIFY_LOG = '1';
+  console.log = (...args) => { lines.push(args.map(String).join(' ')); };
+  try {
+    const result = await call('/api/webhooks/tinyfish?token=test-webhook-secret', {
+      method: 'POST',
+      body: { monitor_id: 'not-ours' },
+    });
+    assert.equal(result.status, 200);
+  } finally {
+    console.log = previousLogFn;
+    if (previousLog === undefined) delete process.env.TINYVERIFY_LOG;
+    else process.env.TINYVERIFY_LOG = previousLog;
+  }
+  assert.ok(lines.some((line) => line.includes('/api/webhooks/tinyfish')), 'request was logged');
+  assert.equal(lines.some((line) => line.includes('test-webhook-secret')), false, 'token leaked to log');
+});
+
+test('refresh is admin-only', () => {
+  assert.equal(refreshAllowed({ refresh: true }, false), false);
+  assert.equal(refreshAllowed({ refresh: 'true' }, false), false);
+  assert.equal(refreshAllowed({ refresh: true }, true), true);
+  assert.equal(refreshAllowed({}, true), false);
 });
 
 test('watching requires an owner token and anonymous refresh is ignored', async () => {

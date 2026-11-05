@@ -1,8 +1,17 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { cacheSize, cached } from '../lib/cache.js';
 import { ownerHashFromRequest, ownerHashFromToken } from '../lib/owner.js';
-import { rateLimit, resetRateLimits } from '../lib/ratelimit.js';
+import { clientIp, rateLimit, resetRateLimits } from '../lib/ratelimit.js';
+import { claimReplay, releaseReplay } from '../lib/store.js';
+
+const previousTrustProxy = process.env.TRUST_PROXY;
+process.env.TRUST_PROXY = '1';
+
+after(() => {
+  if (previousTrustProxy === undefined) delete process.env.TRUST_PROXY;
+  else process.env.TRUST_PROXY = previousTrustProxy;
+});
 
 test('rate limiter blocks over the limit and keys by client address', async () => {
   resetRateLimits();
@@ -86,4 +95,43 @@ test('cache never grows past its entry cap', async () => {
   assert.ok(cacheSize() <= 500, `cache size ${cacheSize()} exceeds 500`);
   const fresh = await cached(['security-test', 'fresh'], 300, async () => ({ value: 'fresh' }));
   assert.equal(fresh.value, 'fresh');
+});
+
+test('proxy headers are ignored unless the proxy is trusted', () => {
+  const savedTrust = process.env.TRUST_PROXY;
+  const savedVercel = process.env.VERCEL;
+  delete process.env.TRUST_PROXY;
+  delete process.env.VERCEL;
+  try {
+    const req = {
+      headers: { 'x-forwarded-for': '203.0.113.99', 'x-real-ip': '203.0.113.98' },
+      socket: { remoteAddress: '10.0.0.5' },
+    };
+    assert.equal(clientIp(req), '10.0.0.5');
+    process.env.TRUST_PROXY = '1';
+    assert.equal(clientIp(req), '203.0.113.98');
+  } finally {
+    if (savedTrust === undefined) delete process.env.TRUST_PROXY;
+    else process.env.TRUST_PROXY = savedTrust;
+    if (savedVercel === undefined) delete process.env.VERCEL;
+    else process.env.VERCEL = savedVercel;
+  }
+});
+
+test('webhook replay claims are atomic and releasable', async () => {
+  const { config } = await import('../lib/config.js');
+  const saved = { url: config.kvUrl, token: config.kvToken };
+  config.kvUrl = '';
+  config.kvToken = '';
+  const key = `tinyverify:test:replay:${Date.now()}`;
+  try {
+    assert.equal(await claimReplay(key, 60), true);
+    assert.equal(await claimReplay(key, 60), false);
+    await releaseReplay(key);
+    assert.equal(await claimReplay(key, 60), true);
+  } finally {
+    config.kvUrl = saved.url;
+    config.kvToken = saved.token;
+    await releaseReplay(key);
+  }
 });

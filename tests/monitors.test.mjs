@@ -10,7 +10,8 @@ process.env.TINYVERIFY_DATA_DIR = dataDir;
 process.env.TINYVERIFY_LOG = '0';
 process.env.TINYVERIFY_ALLOW_AGENT = 'false';
 
-const { createWatch, checkWatch, getWatch, listWatches, deleteWatch, simulateWatch } = await import('../lib/monitors.js');
+const { createWatch, checkWatch, getWatch, listWatches, deleteWatch, simulateWatch, handleTinyfishWebhook } = await import('../lib/monitors.js');
+const { insertMonitor, removeMonitor } = await import('../lib/store.js');
 
 function record(overrides = {}) {
   return makeRecord({
@@ -193,4 +194,131 @@ test('simulateWatch is unavailable unless the demo flag is explicit', async () =
     (err) => err.status === 404,
   );
   await deleteWatch(created.monitor.id, { manageToken: created.manage_token, deleteMonitorFn: fakeDeleteMonitor });
+});
+
+test('createWatch refuses a name/number mismatch', async () => {
+  const mismatched = record({ match_quality: 'mismatch', name_number_mismatch: true });
+  await assert.rejects(
+    () => createWatch(
+      { subject: 'Acme Widgets', licence_type: 'business', jurisdiction: 'UK', number: '00445790' },
+      {
+        verifyFn: async () => ({
+          match_quality: 'mismatch',
+          name_number_mismatch: true,
+          primary: mismatched,
+          results: [mismatched],
+          candidates: [],
+        }),
+        createMonitorFn: fakeCreateMonitor,
+      },
+    ),
+    (err) => err.status === 422 && err.code === 'NAME_NUMBER_MISMATCH',
+  );
+});
+
+test('watches persist health filters and re-check with them', async () => {
+  const healthRecord = record({
+    subject: 'John Smith',
+    matched_name: 'Smith, John',
+    licence_type: 'health',
+    jurisdiction: 'US-FL',
+    licence_number: 'ME182088',
+    registry_id: 'mqa-fl',
+    registry_name: 'Florida Department of Health (MQA)',
+    source_name: 'Florida Department of Health (MQA)',
+    source_url: 'https://mqa-internet.doh.state.fl.us/MQASearchServices/HealthCareProviders/LicenseVerification?LicInd=1&ProCde=2',
+  });
+  const query = {
+    subject: 'John Smith',
+    licence_type: 'health',
+    jurisdiction: 'US-FL',
+    state: 'FL',
+    city: 'Miami',
+    taxonomy: '363L00000X',
+  };
+  const created = await createWatch(query, {
+    verifyFn: async () => ({ ...verification(healthRecord), query: { ...query } }),
+    createMonitorFn: fakeCreateMonitor,
+    ownerHash: 'd'.repeat(64),
+  });
+  assert.equal(created.monitor.state, 'FL');
+  assert.equal(created.monitor.city, 'Miami');
+  assert.equal(created.monitor.taxonomy, '363L00000X');
+
+  let seen = null;
+  await checkWatch(created.monitor.id, {
+    verifyFn: async (input) => {
+      seen = input;
+      return { ...verification(healthRecord), query: { ...query } };
+    },
+    runTinyfish: false,
+    manageToken: created.manage_token,
+  });
+  assert.equal(seen.state, 'FL');
+  assert.equal(seen.city, 'Miami');
+  assert.equal(seen.taxonomy, '363L00000X');
+
+  await deleteWatch(created.monitor.id, { manageToken: created.manage_token, deleteMonitorFn: fakeDeleteMonitor });
+});
+
+test('concurrent checks append one change event, not duplicates', async () => {
+  const created = await createWatch(
+    { subject: 'Tesco PLC', licence_type: 'business', jurisdiction: 'UK' },
+    { verifyFn: async () => verification(record()), createMonitorFn: fakeCreateMonitor },
+  );
+  const changed = record({ status: 'suspended', status_detail: 'Suspended', checked_at: '2026-11-05T09:00:00.000Z' });
+  const verifyFn = async () => verification(changed);
+  const results = await Promise.all([
+    checkWatch(created.monitor.id, { verifyFn, runTinyfish: false, manageToken: created.manage_token }),
+    checkWatch(created.monitor.id, { verifyFn, runTinyfish: false, manageToken: created.manage_token }),
+  ]);
+  assert.equal(results.filter((result) => result.event).length, 1);
+  const { events } = await getWatch(created.monitor.id, { manageToken: created.manage_token });
+  assert.equal(events.length, 1);
+  await deleteWatch(created.monitor.id, { manageToken: created.manage_token, deleteMonitorFn: fakeDeleteMonitor });
+});
+
+test('a watch with no management credential is denied by default', async () => {
+  const id = 'mon_legacy_no_credentials';
+  await insertMonitor({
+    id,
+    subject: 'Legacy Watch',
+    licence_type: 'business',
+    jurisdiction: 'UK',
+    number: '00445790',
+    created_at: '2026-01-01T00:00:00.000Z',
+    events: [],
+    snapshot: { status: 'active' },
+  });
+  try {
+    await assert.rejects(() => getWatch(id), (err) => err.status === 401 && err.code === 'WATCH_TOKEN_REQUIRED');
+    await assert.rejects(
+      () => getWatch(id, { ownerHash: 'a'.repeat(64) }),
+      (err) => err.status === 401 && err.code === 'WATCH_TOKEN_REQUIRED',
+    );
+  } finally {
+    await removeMonitor(id);
+  }
+});
+
+test('webhook resolves the TinyFish page-monitor id field', async () => {
+  const created = await createWatch(
+    { subject: 'Tesco PLC', licence_type: 'business', jurisdiction: 'UK' },
+    {
+      verifyFn: async () => verification(record()),
+      createMonitorFn: async () => ({ monitor: { id: 'tf_hook_page_1', status: 'active' } }),
+    },
+  );
+  try {
+    const result = await handleTinyfishWebhook(
+      { fetch_monitor_id: 'tf_hook_page_1', outcome: 'changed' },
+      { verifyFn: async () => verification(record({ status: 'suspended', status_detail: 'Suspended' })) },
+    );
+    assert.equal(result.ignored, false);
+    assert.equal(result.monitor_id, created.monitor.id);
+    assert.ok(result.event);
+    assert.equal(result.event.new.status, 'suspended');
+  } finally {
+    await deleteWatch(created.monitor.id, { manageToken: created.manage_token, deleteMonitorFn: fakeDeleteMonitor });
+  }
 });
