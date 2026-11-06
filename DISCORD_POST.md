@@ -47,7 +47,7 @@ Watch access: each watch has its own management token, shown once and stored onl
 hash. Knowing the monitor id is not enough to read, re-check or delete it. The webhook requires
 a shared secret in production, uses HMAC with a ±300 s window, and ignores replayed payloads.
 
-58 unit tests on pages captured from the live registries, 12 live checks, zero runtime deps, Node 22.
+102 unit tests on pages captured from the live registries, 13 live checks, zero runtime deps, Node 22.
 Known gaps are documented rather than faked: HCPC sits behind Cloudflare, GMC is client-rendered,
 AHPRA only works through a browser agent and would need a disambiguation rule.
 ```

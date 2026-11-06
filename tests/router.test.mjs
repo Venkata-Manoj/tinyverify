@@ -66,7 +66,7 @@ test('GET /api/registries exposes the live coverage matrix', async () => {
   assert.equal(status, 200);
   assert.equal(data.ok, true);
   assert.deepEqual(data.registries.map((r) => r.id).sort(), [
-    'abn-au', 'companies-house-uk', 'cslb-ca', 'mqa-ca', 'mqa-fl', 'npi-us', 'nz-companies', 'tmb-fl',
+    'abn-au', 'companies-house-uk', 'cslb-ca', 'mqa-fl', 'npi-us', 'nz-companies',
   ]);
   assert.deepEqual(data.combinations.map((c) => `${c.licence_type}/${c.jurisdiction}`).sort(), [
     'business/AU',
@@ -76,10 +76,8 @@ test('GET /api/registries exposes the live coverage matrix', async () => {
     'health/US',
     'health/US-CA',
     'health/US-FL',
-    'health/US-TX',
   ]);
   assert.deepEqual(data.registries.find((r) => r.id === 'mqa-fl').jurisdictions, ['US-FL']);
-  assert.deepEqual(data.registries.find((r) => r.id === 'mqa-ca').jurisdictions, ['US-CA']);
 });
 
 test('POST /api/verify validates input before calling any registry', async () => {

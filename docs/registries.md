@@ -1,6 +1,6 @@
 # Registries
 
-Eight official sources are wired. Each adapter lives in `lib/registries/`, declares its coverage in `meta`, and returns the shared record shape from `lib/schema.js`.
+Six official sources are wired. Each adapter lives in `lib/registries/`, declares its coverage in `meta`, and returns the shared record shape from `lib/schema.js`.
 
 | Registry | `registry_id` | Type | Jurisdiction | Transport |
 |---|---|---|---|---|
@@ -10,14 +10,12 @@ Eight official sources are wired. Each adapter lives in `lib/registries/`, decla
 | California CSLB | `cslb-ca` | `contractor` | `US-CA` | TinyFish Search + direct HTTPS, Agent fallback |
 | US NPPES NPI Registry | `npi-us` | `health` | `US` | TinyFish Fetch (JSON API) |
 | Florida Department of Health (MQA) | `mqa-fl` | `health` | `US-FL` | Direct HTTPS (ASP.NET form + detail page) |
-| Texas Medical Board | `tmb-fl` | `health` | `US-TX` | TinyFish Agent + Fetch |
-| Medical Board of California | `mqa-ca` | `health` | `US-CA` | TinyFish Agent + Fetch |
 
 `GET /api/registries` returns this metadata plus the supported combinations; `GET /api/coverage` returns the matrix alone.
 
-`health / US-FL` resolves to **two** adapters (`npi-us` + `mqa-fl`). `health / US-CA` resolves to **two** (`npi-us` + `mqa-ca`), and `health / US-TX` resolves to **two** (`npi-us` + `tmb-fl`). In each case the federal NPI registry is paired with the state medical board for that state; `health / US` without a state stays federal-only.
+`health / US-FL` resolves to **two** adapters (`npi-us` + `mqa-fl`): the federal NPI registry is paired with the Florida medical board, and the state board record is preferred because it carries expiry and discipline. `health / US` without a state, and other US states, stay federal-only.
 
-US state health queries also send the state code downstream: whenever the jurisdiction is `US` or a `US-XX` state, the NPI lookup is filtered by that state (`state=<code>`), so a Texas query never returns an NPPES hit from California.
+US state health queries also send the state code downstream: whenever the jurisdiction is `US` or a `US-XX` state, the NPI lookup is filtered by that state (`state=<code>`), so a Florida query never returns an NPPES hit from another state.
 
 ---
 
@@ -235,63 +233,6 @@ When CSLB flags complaint disclosure, the adapter also reads `ComplaintDisclosur
 
 ---
 
-## Texas Medical Board (TMB)
-
-**Official site:** https://profile.tmb.state.tx.us
-
-**Why this source:** the Texas Medical Board is the state licensing authority for physicians, and its public "Look Up a License" database publishes licence status, dates and board actions.
-
-**Flow**
-
-1. With a licence number: TinyFish Fetch reads `https://profile.tmb.state.tx.us/Profile.aspx?License=<number>` directly and parses the profile. A page without a licence number is a `no_match`, not an error.
-2. Without a number: TinyFish Agent runs the "Look Up a License" healthcare provider search on `https://profile.tmb.state.tx.us/Search.aspx`, returns up to 10 licence numbers, and TinyFish Fetch reads each `Profile.aspx?License=<number>` page.
-3. Score the parsed profiles against the subject and return one match, several candidates, or no match.
-
-**Record URL:** `https://profile.tmb.state.tx.us/Profile.aspx?License=<number>`
-
-**Parsed fields**
-
-- `status` from the licence status / registration status wording (`Active`, `Suspended`, …); `status_detail` keeps the native wording
-- `number`, `name` (physician name)
-- `expiry_date` (expiry date), `issue_date` (issuance date)
-- `has_discipline` / `discipline` from the board actions block
-
-**Caveats**
-
-- The TMB search form is stateful (anti-forgery token, session), so a plain fetch cannot drive it; the Agent is the only name-search path.
-- A licence number is always the fastest and most reliable input; the agent result is numbers only and never supplies a status.
-- When every licence page behind an agent result fails to read, the adapter raises an error (registry read failure), never a `no_match`.
-
----
-
-## Medical Board of California (MBC)
-
-**Official site:** https://www.mbc.ca.gov/License-Verification
-
-**Why this source:** the Medical Board of California is the state licensing authority for physicians and allied health professionals licensed in California, and it publishes public licensee profiles with status, dates and disciplinary information.
-
-**Flow**
-
-1. With a licence number: TinyFish Fetch reads the licensee profile page and parses it.
-2. Without a number: TinyFish Agent runs the Medical Board licence search, returns licence numbers, and TinyFish Fetch reads each licensee profile page.
-3. Score the parsed profiles against the subject and return one match, several candidates, or no match.
-
-**Record URL:** `https://www.mbc.ca.gov/License-Verification/?licenseNumber=<licence>`
-
-**Parsed fields**
-
-- `status` from the primary licence status (`Current`, `Delinquent`, `Renewal Pending`, …), mapped by the shared vocabulary
-- `number`, `name` (the profile stores the name as `Last, First`)
-- `expiry_date` (expiration date), `issue_date` (issuance date)
-- `has_discipline` / `discipline` from the secondary status and public-reprimand / action wording
-
-**Caveats**
-
-- The profile carries self-reported survey information separately from Board-verified fields; only the licensing fields above are used for status and discipline.
-- The agent is numbers-only; the status always comes from the fetched profile page.
-
----
-
 ## Rejected sources
 
 These were investigated and deliberately not shipped, because a broken or guessed check is worse than an honest gap.
@@ -304,7 +245,7 @@ These were investigated and deliberately not shipped, because a broken or guesse
 | **Ireland CRO** | The public search is a session-based form; no stable server-rendered record page was found for a direct read. | Not wired. |
 | **Washington DOH** | Provider credential search is a Salesforce JavaScript application; the HTML does not contain the record. | Not wired. |
 | **Florida DBPR** | Separate from the Department of Health MQA; the public search did not yield a stable direct record URL in the time available. | Not wired. |
-| **Texas TMB (historical)** | The verification flow was form/session based and did not yield a directly parseable record page. | Superseded: rebuilt on TinyFish Agent + Fetch and shipped as `tmb-fl`. |
-| **California DCA (historical)** | The public API required `app_id` and `app_key`; without credentials it could not be read honestly. | Superseded: the Medical Board of California shipped as `mqa-ca` through the Agent + Fetch pattern. |
+| **Texas Medical Board** | The search form is stateful and every profile URL (`PublicProfile.aspx?<window-token>`) is bound to the session that created it. Without that session the same URL returns the usage-terms page, so there is no stable link a judge could open to prove the record. | Not wired. A result without a shareable source link would violate the trust contract. |
+| **Medical Board of California** | The MBC links to `search.dca.ca.gov`, which returns HTTP 403 to plain HTTP and tells automated clients to use `iservices.dca.ca.gov`; the detail page needs a per-record hash that cannot be derived from a licence number. The Agent path was blocked by an unfunded TinyFish wallet before it could be verified end to end. | Not wired until an Agent run can be verified and its detail link opened without a session. |
 
 The registry metadata is intentionally a closed list: `/api/verify` returns `unsupported` for anything not in the matrix instead of pretending to check it.

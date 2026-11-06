@@ -11,7 +11,7 @@ A record is only returned when TinyVerify has **read the official registry durin
 | `source_url` | The exact official page the data came from | Must be `http(s)`; `assertRecord` rejects anything else |
 | `checked_at` | ISO timestamp of the live read | Must parse as a date; cache preserves the original value |
 | `source_name` | Registry name shown to the user | Required, non-empty |
-| `registry_id` | Stable adapter id (`companies-house-uk`, `cslb-ca`, `npi-us`, `nz-companies`, `abn-au`, `mqa-fl`, `mqa-ca`, `tmb-fl`) | Set by the pipeline |
+| `registry_id` | Stable adapter id (`companies-house-uk`, `cslb-ca`, `npi-us`, `nz-companies`, `abn-au`, `mqa-fl`) | Set by the pipeline |
 | `status` | `active` / `expired` / `suspended` / `revoked` / `dissolved` / `in_liquidation` / `inactive` / `unknown` | Only these eight values are accepted |
 | `status_bounty` | `active` / `expired` / `suspended` / `unknown` | Derived from `status`, never from raw text |
 | `status_detail` | The registry's own wording, unchanged | Stored alongside the mapped status |
@@ -159,12 +159,10 @@ Run against the live sources on **2026-11-05**; the automated live suite repeats
 | `Air New Zealand Limited` + `104799` | business / NZ | `exact`, `active`, NZBN `9429040402543` |
 | `TELSTRA CORPORATION LIMITED` + `33051775556` | business / AU | `exact`, `active`, expiry `null`, entity `Australian Public Company` |
 | `33051775557` | business / AU | HTTP 400 `BAD_NUMBER` (ABN checksum) |
-| `John Smith` | health / US | `multiple`, `total_found: 187`, 20 candidates, no `Jack` |
+| `John Smith` | health / US | `multiple`, `total_found: 188`, 20 candidates, no `Jack` |
 | `Planise Jean Louis` + `1295346773` | health / US | `exact`, `active`, NPI matched |
 | `DONE RIGHT DISCOUNT FLOORING` + `738180` | contractor / US-CA | `exact`, `revoked`, expiry `2017-05-28`, arbitration `A S 2016 000293` |
 | `JOHN HORATIO SMITH II` + `ME182088` | health / US-FL | `exact`, `active`, expiry `2028-01-31`, NPI `no_match`, MQA `match` |
-| `John Smith` | health / US-CA | cross-registry: NPI + Medical Board of California queried together; searched ids `['mqa-ca','npi-us']` |
-| `John Smith` | health / US-TX | cross-registry: NPI + Texas Medical Board queried together; TMB number lookup reads the licence profile |
 | `!!! ***` | business / UK | `no_match`, `searched: []`, no registry call |
 | `Test Doctor` | health / JP | `unsupported`, supported health jurisdictions listed |
 

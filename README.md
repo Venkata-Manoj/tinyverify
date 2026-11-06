@@ -48,10 +48,8 @@ node cli.js check mon_xxxxxxxxxxxx
 | `contractor` | `US-CA` | [California CSLB](https://www.cslb.ca.gov) | licence status, number, issue/expiry dates, classifications, bond, workers' comp, complaint disclosure and arbitration records |
 | `health` | `US` | [US NPPES NPI Registry](https://npiregistry.cms.hhs.gov) | enrolment status, NPI, provider name, taxonomy, declared state licence; optional state/city/taxonomy filters; state-filtered when the jurisdiction is a US state, results capped at 200 |
 | `health` | `US-FL` | [Florida MQA](https://mqa-internet.doh.state.fl.us/MQASearchServices/HealthCareProviders) | licence status, number, profession, expiry, issue date, discipline and public-complaint flags |
-| `health` | `US-TX` | [Texas Medical Board](https://profile.tmb.state.tx.us) | licence status, number, expiry date, Board actions and disciplinary flags |
-| `health` | `US-CA` | [Medical Board of California](https://www.mbc.ca.gov/License-Verification) | licensee licence status, number, expiry date, issue date, discipline and public-reprimand flags |
 
-`health / US-TX` is a **cross-registry** check: TinyVerify queries the federal NPI registry and the Texas medical board together, keeps both records, and prefers the state board record because it carries expiry and discipline. `health / US-CA` is the same shape for California (`npi-us` + `mqa-ca`), and `health / US` with `"state": "TX"` or `"state": "CA"` does the same. In each case the federal NPI registry is paired with the state medical board for that state; `health / US` without a state stays federal-only.
+`health / US-FL` is a **cross-registry** check: TinyVerify queries the federal NPI registry and the Florida medical board together, keeps both records, and prefers the state board record because it carries expiry and discipline. Other US states stay federal-only: the NPI registry answers, and the record says it is an enrolment record rather than a state licence.
 
 Every US-state health query sends the state code downstream, so an NPI lookup filtered by state only ever returns providers licensed in that state. NPI result totals are capped at 200 (`NPI_LIMIT`) and reported with `total_capped` / `total_display: "200+ (capped)"` rather than silently summed.
 
@@ -113,19 +111,11 @@ A result from any other domain is discarded. Search never supplies a status; it 
 
 Australia and Florida are read over direct HTTPS because their pages are server-rendered and need no browser. CSLB detail pages are also read directly; Search only resolves the short record URL.
 
-### 3. TinyFish Agent — drive state medical board name searches
+### 3. TinyFish Agent — drive the CSLB name search
 
-Some state medical board name searches are session-based web forms rather than query endpoints.
-
-- **California CSLB** — `CheckLicense.aspx` (contractor name form cannot be driven over plain HTTP).
-- **Texas Medical Board** — `https://profile.tmb.state.tx.us/Search.aspx` ("Look Up a License" healthcare provider search).
-- **Medical Board of California** — licence search behind the Medical Board licensee profile search.
-
-When Search resolves no record URL (or the registry uses an agent-only form), TinyVerify starts a **TinyFish Agent** run, tells it to choose the right form flow, enter the name, submit, and return up to 10 licence numbers using a JSON output schema. The Agent only supplies **licence numbers**; TinyVerify then fetches each official detail page and reads the status, dates and disclosures itself. That keeps the agent out of the trust path.
+CSLB's contractor name search is a session-based ASP.NET form, not a query endpoint. When TinyFish Search resolves no record URL, TinyVerify starts a **TinyFish Agent** run, tells it to choose the business-name flow, enter the name, submit, and return up to 10 licence numbers using a JSON output schema. The Agent only supplies **licence numbers**; TinyVerify then fetches each official detail page and reads the status, dates and disclosures itself. That keeps the agent out of the trust path.
 
 The fallback is budgeted: **3 runs per hour per instance**, **2 concurrent runs**, a **24-hour result cache** per name (`TINYVERIFY_AGENT_CACHE_TTL`, default `86400` seconds), and a hard cap on the prompt's subject text. The subject is quoted as a JSON literal and described as data, not instructions.
-
-The same pattern is used for the Texas Medical Board and the Medical Board of California: Agent runs the browser search, returns licence numbers, TinyVerify fetches each licence profile page and reads status / dates / discipline from those pages. The agent never supplies a status.
 
 ### 4. TinyFish Monitor — watch the record for changes
 
@@ -279,20 +269,19 @@ Monitors persist in Upstash Redis (`KV_REST_API_URL` + `KV_REST_API_TOKEN`) in t
 ## Tests and evidence
 
 ```text
-npm test         →  114 tests, 98 pass, 0 fail, 16 skipped (live tests)
-npm run test:live →  12 pass, 0 fail
+npm test         →  102 tests, 89 pass, 0 fail, 13 skipped (live tests)
+npm run test:live →  13 pass, 0 fail
 ```
 
-Unit coverage: name normalisation and variants, the token gate that rejects partial overlaps, status vocabulary (including liquidation / dissolved / inactive), date parsing, all seven registry parsers against pages captured from the live sites, mismatch detection, total-count handling (including the NPI 200 cap), the cross-registry rules for Florida, California and Texas, snapshot diffing, monitor lifecycle and per-watch access control, transient-miss handling, webhook signatures/replay, HTTP routing, error shapes, body limits, rate limiting and security headers.
+Unit coverage: name normalisation and variants, the token gate that rejects partial overlaps, status vocabulary (including liquidation / dissolved / inactive), date parsing, all six registry parsers against pages captured from the live sites, mismatch detection, total-count handling (including the NPI 200 cap), the Florida cross-registry rule, snapshot diffing, monitor lifecycle and per-watch access control, transient-miss handling, webhook signatures/replay, HTTP routing, error shapes, body limits, rate limiting and security headers.
 
-The live suite checks: UK exact / nonsense / name-number mismatch / liquidation, NZ, AU ABN and checksum, NPI true count and exact number, CSLB revocation plus arbitration disclosure, the Florida NPI + MQA cross-check, the California NPI + Medical Board of California cross-check, the Texas NPI + TMB cross-check, and special-character handling. Live probe evidence is in `docs/evidence/` (`api-proof.json` for Search/Fetch/Agent/Monitor responses, `cslb-agent.mjs` for the Agent run, `probe-mqa.mjs` for the Florida number-search redirect).
+The live suite checks: UK exact / nonsense / name-number mismatch / liquidation, NZ, AU ABN and checksum, NPI true count and exact number, CSLB revocation plus arbitration disclosure, the Florida NPI + MQA cross-check, and special-character handling. Live probe evidence is in `docs/evidence/` (`api-proof.json` for Search/Fetch/Agent/Monitor responses, `cslb-agent.mjs` for the Agent run, `probe-mqa.mjs` for the Florida number-search redirect).
 
 ## Known limits
 
-- **Not covered:** UK HCPC (Cloudflare), UK GMC (client-rendered), Australia AHPRA (F5 challenge and no disambiguation rule), Ireland CRO (no clean public record page), Washington DOH (Salesforce JS), Florida DBPR (separate from the Department of Health MQA). Each is documented as a rejected source in [docs/registry-research.md](docs/registry-research.md) rather than shipped broken.
+- **Not covered:** UK HCPC (Cloudflare), UK GMC (client-rendered), Australia AHPRA (F5 challenge and no disambiguation rule), Ireland CRO (no clean public record page), Washington DOH (Salesforce JS), Florida DBPR (separate from the Department of Health MQA), Texas Medical Board (session-bound profiles with no stable shareable URL), Medical Board of California (DCA search blocks plain HTTP and its detail hashes cannot be derived). Each is documented as a rejected source in [docs/registry-research.md](docs/registry-research.md) rather than shipped broken.
 - **CSLB name search** depends on either TinyFish Search finding a record URL or the Agent fallback running; a name-only lookup can take up to ~2.5 minutes. Supplying a licence number is always faster and exact.
-- **NPPES is an enrolment registry**, not a state licence board. It shows the state licence number a provider declared but does not publish that licence's status; the record says so, and the state medical board check pairs it with the state board. NPI totals are capped at 200 with an explicit `total_capped` flag instead of a silent sum.
-- **Texas TMB / Medical Board of California number formats** differ per board (numeric licence numbers for TMB; letter prefix plus digits, e.g. `A109646`, for MBC). The Agent returns licence numbers and TinyVerify validates the shape before any lookup runs.
+- **NPPES is an enrolment registry**, not a state licence board. It shows the state licence number a provider declared but does not publish that licence's status; the record says so. Florida is the one state where the federal record is paired with the state board. NPI totals are capped at 200 with an explicit `total_capped` flag instead of a silent sum.
 - **UK Companies House / NZ / AU** records have no expiry date. `expiry_date` is `null` and the UI says "Not applicable" instead of inventing one.
 - **Florida MQA number search** answers an exact licence number with a 302 straight to the detail page. The adapter follows that redirect; it does not read a result table that is not sent.
 - **Monitors** re-verify through TinyVerify's own pipeline on every check, so a change event always carries a fresh `source_url` and `checked_at`, even if the TinyFish webhook payload is incomplete.

@@ -138,59 +138,11 @@ test('US-FL: NPI and the Florida board are queried together for a state licence'
   assert.equal(npi.outcome, 'no_match');
 });
 
-test('US-CA: Medical Board of California joins the health / US-CA cross-registry check', opts, async () => {
-  const result = await verify(query('John Smith', 'health', 'US-CA'), { refresh: true });
-  const ids = result.searched.map((row) => row.registry_id).sort();
-  assert.deepEqual(ids, ['mqa-ca', 'npi-us']);
-});
-
-test('US-TX: Texas Medical Board license number lookup reads the detail page', opts, async () => {
-  // The number path reads the licence profile directly. An unreadable page is a
-  // registry error (the adapter never converts a read failure into a no-match);
-  // a readable page without a licence number is the no-match path.
-  const result = await verify(query('', 'health', 'US-TX', { number: '1234567' }), { refresh: true });
-  if (result.ok) {
-    assert.notEqual(result.match_quality, 'exact');
-  }
-});
-
 test('special characters return a clean no_match with no registry call', opts, async () => {
   const result = await verify(query('!!! ***', 'business', 'UK'), { refresh: true });
   assert.equal(result.match_quality, 'no_match');
   assert.equal(result.searched.length, 0);
   assert.match(result.notes.join(' '), /no letters or digits/i);
-});
-
-test('US-TX: Texas Medical Board physician lookup by name', opts, async () => {
-  // The TMB search form is CAPTCHA-protected; live lookups by name may fail.
-  // If they do, that's expected — the number lookup path works.
-  const result = await verify(query('John Smith', 'health', 'US-TX'), { refresh: true });
-  if (result.ok) {
-    assert.ok(result.primary || result.candidates.length > 0, 'Expected at least one match');
-    if (result.primary) {
-      assert.match(result.primary.source_url, /Profile\.aspx/);
-      assert.match(result.primary.status_detail, /active|suspended|revoked/i);
-    }
-  }
-});
-
-test('US-TX: Texas Medical Board license number lookup', opts, async () => {
-  // Number lookup goes directly to detail page, bypassing the CAPTCHA search form.
-  const result = await verify(query('', 'health', 'US-TX', { number: '1234567' }), { refresh: true });
-  // May return no_match if the number isn't in the system, but should not error
-  assert.ok(result.ok !== false, 'Verification should not error');
-});
-
-test('US-TX: Texas Medical Board multiple matches handled clearly', opts, async () => {
-  // Name-based search may hit CAPTCHA; if it works, verify no auto-selection.
-  // If it fails with REGISTRY_UNAVAILABLE, that's expected due to CAPTCHA.
-  const result = await verify(query('John Doe', 'health', 'US-TX'), { refresh: true });
-  if (result.ok) {
-    assert.ok(result.match_quality === 'multiple' || result.match_quality === 'no_match', 'Should not auto-select');
-    if (result.candidates && result.candidates.length > 0) {
-      result.candidates.forEach((c) => assert.ok(c.source_url, 'Candidate should have source_url'));
-    }
-  }
 });
 
 test('special name/number mismatch returns mismatch', opts, async () => {

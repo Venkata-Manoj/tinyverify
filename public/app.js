@@ -344,13 +344,13 @@
     });
   }
 
-  /** Agent-driven boards (state medical boards) run a browser search before the fetch. */
+  /** CSLB resolves a business name through TinyFish Search, then the Agent fallback. */
   function stagesFor(query) {
     const jurisdiction = String(query?.jurisdiction || '').toUpperCase();
-    const healthUs = ['US', 'US-CA', 'US-FL', 'US-TX'].includes(jurisdiction);
-    if (healthUs && !query?.number) {
+    const nameOnlyContractor = query?.licence_type === 'contractor' && jurisdiction === 'US-CA' && !query?.number;
+    if (nameOnlyContractor) {
       return [
-        'Running the licensed search agent…',
+        'Resolving the official CSLB record…',
         'Fetching the live record…',
         'Extracting and normalising fields…',
         'Checking the source link…'
