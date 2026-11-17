@@ -21,6 +21,8 @@ const base = {
   source_url: 'https://find-and-update.company-information.service.gov.uk/company/00445790',
   checked_at: '2026-11-04T12:00:00.000Z',
   match_quality: 'exact',
+  matched_name: 'TESCO PLC',
+  exists: true,
 };
 
 test('makeRecord fills the required record shape', () => {

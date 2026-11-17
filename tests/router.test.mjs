@@ -66,7 +66,7 @@ test('GET /api/registries exposes the live coverage matrix', async () => {
   assert.equal(status, 200);
   assert.equal(data.ok, true);
   assert.deepEqual(data.registries.map((r) => r.id).sort(), [
-    'abn-au', 'companies-house-uk', 'cslb-ca', 'mqa-fl', 'npi-us', 'nz-companies',
+    'abn-au', 'companies-house-uk', 'cslb-ca', 'mbc-ca', 'mqa-fl', 'npi-us', 'nz-companies',
   ]);
   assert.deepEqual(data.combinations.map((c) => `${c.licence_type}/${c.jurisdiction}`).sort(), [
     'business/AU',

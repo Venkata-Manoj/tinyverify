@@ -154,9 +154,9 @@ test('registry resolution accepts aliases and rejects unsupported pairs', () => 
   assert.deepEqual(resolveRegistries('company', 'New Zealand').map((r) => r.meta.id), ['nz-companies']);
   assert.deepEqual(resolveRegistries('business', 'Australia').map((r) => r.meta.id), ['abn-au']);
   assert.deepEqual(resolveRegistries('health', 'US-FL').map((r) => r.meta.id), ['npi-us', 'mqa-fl']);
-  assert.deepEqual(resolveRegistries('health', 'US-CA').map((r) => r.meta.id), ['npi-us']);
+  assert.deepEqual(resolveRegistries('health', 'US-CA').map((r) => r.meta.id), ['npi-us', 'mbc-ca']);
   assert.deepEqual(resolveRegistries('health', 'US-TX').map((r) => r.meta.id), ['npi-us']);
-  assert.deepEqual(resolveRegistries('health', 'USA', { state: 'CA' }).map((r) => r.meta.id), ['npi-us']);
+  assert.deepEqual(resolveRegistries('health', 'USA', { state: 'CA' }).map((r) => r.meta.id), ['npi-us', 'mbc-ca']);
   assert.deepEqual(resolveRegistries('health', 'USA', { state: 'FL' }).map((r) => r.meta.id), ['npi-us', 'mqa-fl']);
   assert.deepEqual(resolveRegistries('health', 'USA').map((r) => r.meta.id), ['npi-us']);
   assert.deepEqual(resolveRegistries('medical', 'NZ'), []);
