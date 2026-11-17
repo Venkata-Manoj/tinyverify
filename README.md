@@ -9,7 +9,7 @@ TinyVerify answers a question a hiring manager or compliance team actually has t
 
 You give it a **name**, a **record type** and a **jurisdiction**. TinyVerify reads the **live official registry**, returns a structured record with the **source link** and a **`checked_at` timestamp**, and can **watch that record** so a status change is caught without re-checking by hand.
 
-It never invents a record. If the official source cannot confirm one, the answer is `no_match`. If several records could be the same subject, every candidate is returned and none is auto-selected. If the name and a supplied registration number describe different records, the response is flagged `mismatch` instead of pretending the pair is verified.
+It never invents a record. If the official source cannot confirm one, the answer is `no_match`. If a registry does not answer inside its budget, the response says `incomplete: true` and that registry is reported as **not checked (timed out)** — never as a miss. If several records could be the same subject, every candidate is returned and none is auto-selected. If the name and a supplied registration number describe different records, the response is flagged `mismatch` instead of pretending the pair is verified.
 
 ![TinyVerify returning the live NZ Companies Office record for Air New Zealand Limited](docs/screenshot-exact.png)
 
@@ -26,6 +26,8 @@ Open https://tinyverify.vercel.app and press one of the sample chips:
 | **Air New Zealand Limited** · business · NZ | New Zealand company with NZBN, registered office and annual-return data |
 | **TELSTRA CORPORATION LIMITED** · business · AU | Australian ABN with GST and entity type |
 | **JOHN HORATIO SMITH II** · health · US-FL | Federal NPI and Florida medical board checked together |
+| **Dennis Yun** · health · US-CA · `A93764` | Medical Board of California profile with expiry and discipline |
+| **John Flint Smith** · health · US-TX · `L5138` | Texas Medical Board licence extract with status, degree and expiry |
 
 Or verify from the CLI:
 
@@ -48,8 +50,10 @@ node cli.js check mon_xxxxxxxxxxxx
 | `contractor` | `US-CA` | [California CSLB](https://www.cslb.ca.gov) | licence status, number, issue/expiry dates, classifications, bond, workers' comp, complaint disclosure and arbitration records |
 | `health` | `US` | [US NPPES NPI Registry](https://npiregistry.cms.hhs.gov) | enrolment status, NPI, provider name, taxonomy, declared state licence; optional state/city/taxonomy filters; state-filtered when the jurisdiction is a US state, results capped at 200 |
 | `health` | `US-FL` | [Florida MQA](https://mqa-internet.doh.state.fl.us/MQASearchServices/HealthCareProviders) | licence status, number, profession, expiry, issue date, discipline and public-complaint flags |
+| `health` | `US-CA` | [Medical Board of California](https://search.dca.ca.gov) | licence status, number, issue and expiry dates, licence type, disciplinary actions |
+| `health` | `US-TX` | [Texas Medical Board](https://data.texas.gov/d/tm3v-pfq9) | licence status, number, degree, issue and expiry dates, disciplinary status, practice location |
 
-`health / US-FL` is a **cross-registry** check: TinyVerify queries the federal NPI registry and the Florida medical board together, keeps both records, and prefers the state board record because it carries expiry and discipline. Other US states stay federal-only: the NPI registry answers, and the record says it is an enrolment record rather than a state licence.
+`health / US-FL`, `health / US-CA` and `health / US-TX` are **cross-registry** checks: TinyVerify queries the federal NPI registry and the state medical board together, keeps both records, and prefers the state board record because it carries expiry and discipline. Other US states stay federal-only: the NPI registry answers, and the record says it is an enrolment record rather than a state licence.
 
 Every US-state health query sends the state code downstream, so an NPI lookup filtered by state only ever returns providers licensed in that state. NPI result totals are capped at 200 (`NPI_LIMIT`) and reported with `total_capped` / `total_display: "200+ (capped)"` rather than silently summed.
 
@@ -108,14 +112,15 @@ A result from any other domain is discarded. Search never supplies a status; it 
 
 - **UK Companies House** — fetch the company overview page and the paginated search result list (HTML parsing for links).
 - **US NPPES NPI Registry** — Node's `fetch` can fail with `EAI_AGAIN` for `npiregistry.cms.hhs.gov`; TinyFish Fetch reads the JSON API reliably, returned as `html` and parsed as JSON.
+- **Medical Board of California** — reads the DCA licensee profile with `include_selectors: ["body"]`; the DCA search form itself needs the Agent.
 
 Australia and Florida are read over direct HTTPS because their pages are server-rendered and need no browser. CSLB detail pages are also read directly; Search only resolves the short record URL.
 
-### 3. TinyFish Agent — drive the CSLB name search
+### 3. TinyFish Agent — drive the CSLB and California medical board name searches
 
-CSLB's contractor name search is a session-based ASP.NET form, not a query endpoint. When TinyFish Search resolves no record URL, TinyVerify starts a **TinyFish Agent** run, tells it to choose the business-name flow, enter the name, submit, and return up to 10 licence numbers using a JSON output schema. The Agent only supplies **licence numbers**; TinyVerify then fetches each official detail page and reads the status, dates and disclosures itself. That keeps the agent out of the trust path.
+CSLB's contractor name search is a session-based ASP.NET form, not a query endpoint. So is the California Department of Consumer Affairs search behind the Medical Board of California. When TinyFish Search resolves no record URL, TinyVerify starts a **TinyFish Agent** run, tells it to enter the name on the official form, and return up to 10 licence numbers using a JSON output schema. The Agent only supplies **licence numbers**; TinyVerify then fetches each official detail page and reads the status, dates and disclosures itself. That keeps the agent out of the trust path.
 
-The fallback is budgeted: **3 runs per hour per instance**, **2 concurrent runs**, a **24-hour result cache** per name (`TINYVERIFY_AGENT_CACHE_TTL`, default `86400` seconds), and a hard cap on the prompt's subject text. The subject is quoted as a JSON literal and described as data, not instructions.
+The fallback is budgeted: **3 runs per hour per instance**, **2 concurrent runs**, a **24-hour result cache** per name (`TINYVERIFY_AGENT_CACHE_TTL`, default `86400` seconds), and a hard cap on the prompt's subject text. The subject is quoted as a JSON literal and described as data, not instructions. The cache key is the registry, the normalised subject and the jurisdiction, and it is stored in KV in production, so a repeat lookup returns `cached: true` from any instance.
 
 ### 4. TinyFish Monitor — watch the record for changes
 
@@ -202,7 +207,9 @@ curl -s https://tinyverify.vercel.app/api/verify \
   -d '{"subject":"JOHN HORATIO SMITH II","licence_type":"health","jurisdiction":"US-FL","number":"ME182088"}'
 ```
 
-Every successful response includes `checked_at` and, per record, `source_url`. Results are cached for 10 minutes; a cached response keeps the original `source_url` and `checked_at` and says so in `notes`, with `cached: true`.
+Every successful response includes `checked_at` and, per record, `source_url`. Results are cached for 10 minutes in KV (shared across instances, memory fallback); a cached response keeps the original `source_url` and `checked_at` and says so in `notes`, with `cached: true` and `cache_age_seconds`.
+
+Registries run in parallel, each under a **25-second budget** (`TINYVERIFY_REGISTRY_BUDGET_SECONDS`). A registry that does not answer inside its budget is reported in `searched` with `outcome: "timeout"` and the response carries `incomplete: true`; finished registries are still returned. A timeout is **not checked**, never `no_match` — the UI prints "not checked (timed out), retry" and re-runs the query on request.
 
 ### Watch security model
 
@@ -243,7 +250,7 @@ Requires Node 22+. Zero runtime dependencies.
 ```bash
 cp .env.example .env          # add TINYFISH_API_KEY
 npm run dev                   # http://localhost:3000
-npm test                      # 98 pass, 0 fail, 16 skipped (live tests)
+npm test                      # 117 pass, 0 fail, 13 skipped (live tests)
 npm run test:live             # real registry checks (LIVE=1)
 npm run check                 # syntax check of entry points
 ```
@@ -258,6 +265,8 @@ TINYVERIFY_DEMO=1                    # optional demo simulator
 TINYVERIFY_MONITOR_CRON=0 8 * * *
 TINYVERIFY_PUBLIC_URL=https://your-deployment
 TINYVERIFY_AGENT_CACHE_TTL=86400   # Agent result cache TTL in seconds (default 24h)
+TINYVERIFY_REGISTRY_BUDGET_SECONDS=25  # per-registry hard budget
+TINYVERIFY_CACHE_TTL=600           # result cache TTL in seconds
 KV_REST_API_URL=...
 KV_REST_API_TOKEN=...
 ```
@@ -269,17 +278,19 @@ Monitors persist in Upstash Redis (`KV_REST_API_URL` + `KV_REST_API_TOKEN`) in t
 ## Tests and evidence
 
 ```text
-npm test         →  102 tests, 89 pass, 0 fail, 13 skipped (live tests)
+npm test         →  130 tests, 117 pass, 0 fail, 13 skipped (live tests)
 npm run test:live →  13 pass, 0 fail
 ```
 
-Unit coverage: name normalisation and variants, the token gate that rejects partial overlaps, status vocabulary (including liquidation / dissolved / inactive), date parsing, all six registry parsers against pages captured from the live sites, mismatch detection, total-count handling (including the NPI 200 cap), the Florida cross-registry rule, snapshot diffing, monitor lifecycle and per-watch access control, transient-miss handling, webhook signatures/replay, HTTP routing, error shapes, body limits, rate limiting and security headers.
+Unit coverage: name normalisation and variants, the token gate that rejects partial overlaps, status vocabulary (including liquidation / dissolved / inactive), date parsing, all eight registry parsers against pages captured from the live sites, the exact-match invariant, mismatch detection, total-count handling (including the NPI 200 cap), the state-board cross-registry rules, parallel execution with per-registry timeouts, the KV-backed cache, Companies House former-name matching, snapshot diffing, monitor lifecycle and per-watch access control, transient-miss handling, webhook signatures/replay, HTTP routing, error shapes, body limits, rate limiting and security headers.
 
 The live suite checks: UK exact / nonsense / name-number mismatch / liquidation, NZ, AU ABN and checksum, NPI true count and exact number, CSLB revocation plus arbitration disclosure, the Florida NPI + MQA cross-check, and special-character handling. Live probe evidence is in `docs/evidence/` (`api-proof.json` for Search/Fetch/Agent/Monitor responses, `cslb-agent.mjs` for the Agent run, `probe-mqa.mjs` for the Florida number-search redirect).
 
 ## Known limits
 
-- **Not covered:** UK HCPC (Cloudflare), UK GMC (client-rendered), Australia AHPRA (F5 challenge and no disambiguation rule), Ireland CRO (no clean public record page), Washington DOH (Salesforce JS), Florida DBPR (separate from the Department of Health MQA), Texas Medical Board (session-bound profiles with no stable shareable URL), Medical Board of California (DCA search blocks plain HTTP and its detail hashes cannot be derived). Each is documented as a rejected source in [docs/registry-research.md](docs/registry-research.md) rather than shipped broken.
+- **Not covered:** UK HCPC (Cloudflare), UK GMC (client-rendered), Australia AHPRA (F5 challenge and no disambiguation rule), Ireland CRO (no clean public record page), Washington DOH (Salesforce JS), Florida DBPR (separate from the Department of Health MQA). Each is documented as a rejected source in [docs/registry-research.md](docs/registry-research.md) rather than shipped broken.
+- **California medical board name searches** depend on the TinyFish Agent; if the wallet or the hourly budget is exhausted the lookup is an error, not a "no licensee". Licence-number lookups bypass the Agent entirely.
+- **Texas Medical Board** is read from the Board's official licence extract on the Texas Open Data Portal, because the TMB website profile URL is session-bound and cannot be shared. The record carries the dataset URL as its source.
 - **CSLB name search** depends on either TinyFish Search finding a record URL or the Agent fallback running; a name-only lookup can take up to ~2.5 minutes. Supplying a licence number is always faster and exact.
 - **NPPES is an enrolment registry**, not a state licence board. It shows the state licence number a provider declared but does not publish that licence's status; the record says so. Florida is the one state where the federal record is paired with the state board. NPI totals are capped at 200 with an explicit `total_capped` flag instead of a silent sum.
 - **UK Companies House / NZ / AU** records have no expiry date. `expiry_date` is `null` and the UI says "Not applicable" instead of inventing one.

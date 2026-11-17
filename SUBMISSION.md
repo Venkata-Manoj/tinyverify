@@ -41,12 +41,15 @@ belong to the supplied registration number comes back as `mismatch` with an expl
 | `contractor` | `US-CA` | California CSLB | licence status, number, issue/expiry, classifications, bond, workers' comp, complaint disclosure and arbitrations |
 | `health` | `US` | US NPPES NPI Registry | enrolment status, NPI, provider name, taxonomy, declared state licence; state/city/taxonomy filters |
 | `health` | `US-FL` | Florida MQA | licence status, number, profession, expiry, issue date, discipline and public-complaint flags |
+| `health` | `US-CA` | Medical Board of California | licence status, number, issue/expiry, licence type, disciplinary actions |
+| `health` | `US-TX` | Texas Medical Board | licence status, number, degree, issue/expiry, disciplinary status, practice location |
 
-That is **six registries across 3 record types and 4 countries** (UK, NZ, AU, US). `health / US-FL`
-is a **cross-registry** check: it queries **two registries in one request** (NPPES + the Florida
-medical board) and returns both outcomes. US-state health queries send the state code downstream to
-the NPI lookup, which is filtered by state and capped at 200 results. Other US states are federal-only,
-and the record says the NPI is an enrolment record rather than a state licence.
+That is **eight registries across 3 record types and 4 countries** (UK, NZ, AU, US). `health / US-FL`,
+`health / US-CA` and `health / US-TX` are **cross-registry** checks: each queries **two registries in
+one request** (NPPES + the state medical board) and returns both outcomes. US-state health queries
+send the state code downstream to the NPI lookup, which is filtered by state and capped at 200
+results. Other US states are federal-only, and the record says the NPI is an enrolment record rather
+than a state licence.
 
 ### Live examples
 
@@ -74,6 +77,14 @@ JOHN HORATIO SMITH II · health · US-FL · ME182088
 → exact · active · expiry 2028-01-31 · mqa-fl primary
   searched: npi-us no_match, mqa-fl match
 
+Dennis Yun · health · US-CA · A93764
+→ exact · active · expiry 2028-01-31 · mbc-ca primary
+  https://search.dca.ca.gov/profile/800/8002/93764/A
+
+John Flint Smith · health · US-TX · L5138
+→ exact · active · expiry 2028-05-31 · degree MD · tmb-tx primary
+  https://data.texas.gov/resource/tm3v-pfq9.json?license_number=L5138
+
 John Smith · health · US
 → multiple · total_found 188 · 20 candidates in the captured run · no "Jack"
 
@@ -94,7 +105,7 @@ qwzxv plorb · business · UK
 | Submission requirement | Where it is met |
 |---|---|
 | Name, licence or record type, jurisdiction | The form and `POST /api/verify` accept `subject`, `licence_type`, `jurisdiction`, plus optional `number`, `state`, `city`, `taxonomy`. |
-| At least two official registries | Six: UK Companies House, NZ Companies Office, Australian Business Register, California CSLB, US NPPES, Florida MQA. `GET /api/coverage` lists every combination. |
+| At least two official registries | Eight: UK Companies House, NZ Companies Office, Australian Business Register, California CSLB, US NPPES, Florida MQA, Medical Board of California, Texas Medical Board. `GET /api/coverage` lists every combination. |
 | Structured record | Every record carries `status`, `status_bounty`, `licence_number`, `expiry_date`, `disciplinary_actions`, `disciplinary_records`, `source_url`, `checked_at`, `status_detail`, `match_quality`, `registry_id`, `name_number_mismatch`, `total_found`. |
 | TinyFish Monitor flags status changes | Each watch creates a scheduled TinyFish Monitor on the official URL with a webhook; `Check now` re-reads and diffs a five-field snapshot. |
 | Agent, Fetch, Search, Monitor explanation | "How TinyFish is used" below, with what breaks without each endpoint. |
@@ -105,14 +116,14 @@ qwzxv plorb · business · UK
 | Accurate status, numbers and dates | `Tesco PLC` → `00445790`, active. `Carillion PLC` → `in_liquidation` ("Liquidation"). `Air New Zealand Limited` → `104799`, active. `TELSTRA` → ABN `33051775556`, active. `DONE RIGHT DISCOUNT FLOORING` / `738180` → `revoked`, expiry `2017-05-28`. `JOHN HORATIO SMITH II` / `ME182088` → active, expiry `2028-01-31`. |
 | No match / several matches without guessing | `qwzxv plorb` → `no_match` with 0 candidates; `Air New Zealand` → `multiple`; `John Smith` → `multiple` with NPPES' true count (188 in the captured run) and no unrelated first names; below-threshold names go to `near_misses`; unwired combinations return `unsupported`. |
 | Name/number honesty | `Acme Widgets` + `00445790` → `mismatch`, `name_number_mismatch: true`, official name `TESCO PLC`; a number-only lookup is `exact` by number. |
-| Works for different people, businesses and places | Six registries, three record types, four countries; name-only, name + number and number-only lookups; health state/city/taxonomy filters; name variants tried and disclosed. |
+| Works for different people, businesses and places | Eight registries, three record types, four countries; name-only, name + number and number-only lookups; health state/city/taxonomy filters; name variants tried and disclosed. |
 | Output is structured and reusable | Stable JSON contract, per-record `registry_id` and `source_url`, `checked_at`, OpenAPI 3.1 and JSON Schema in `docs/`. Any tool can call `POST /api/verify`. |
 | Security and abuse resistance | Per-watch management token (stored as SHA-256), owner-scoped listing, admin key, HMAC webhook with ±300 s replay window, 64 KB body cap, rate limits, Agent budget/concurrency cap, anonymous refresh disabled. |
 | Monitor demo is honest | `TINYVERIFY_DEMO=1` exposes a labelled simulator. Its events are `simulated: true`, say "not a live read", and never mutate the snapshot. Real changes come from a fresh registry read. |
 
 TinyFish scoring: **4 endpoints — Search, Fetch, Agent, Monitor — 200 points.** Each one is load-bearing;
-the table below states what breaks without it. Covers **six** registries across 3 record types and 4
-countries (UK, NZ, AU, US). All **102 unit tests pass** (89 pass, 0 fail; 13 live-only, skipped without
+the table below states what breaks without it. Covers **eight** registries across 3 record types and 4
+countries (UK, NZ, AU, US). All **130 unit tests pass** (117 pass, 0 fail; 13 live-only, skipped without
 `LIVE=1`) and the live suite runs **13** registry checks with `LIVE=1`. Demo-labelled monitor simulate
 events use `simulated: true` and `detected_by: "TinyVerify demo simulator (not a live read)"`.
 Production deployment SHA is recorded in [docs/evidence/production-checks.md](docs/evidence/production-checks.md).
@@ -128,17 +139,18 @@ the registry's record pattern. Anything off-domain is discarded. Search never su
 it only finds the page that does.
 
 **Fetch** — reads the official pages. `fetchPages()` batches up to 10 URLs per call with
-`ttl: 0` for a fresh read. It fetches UK Companies House record and search pages, and the NPPES
+`ttl: 0` for a fresh read. It fetches UK Companies House record and search pages, the NPPES
 NPI JSON API — Node's own `fetch` can fail with `EAI_AGAIN` on `npiregistry.cms.hhs.gov`, so Fetch is
-the reliable transport there.
+the reliable transport there — and the Medical Board of California's DCA licensee profile.
 
-**Agent** — drives the California CSLB "Check A License" form. CSLB's name search is a session-based
-ASP.NET form; when Search resolves no record URL, a TinyFish Agent run opens `CheckLicense.aspx`,
-chooses *Check by Business Name*, types the name, submits, and returns up to 10 licence numbers
-against a JSON output schema. The agent supplies **licence numbers only** — the status, dates and
-disclosures are then read from the official detail page by TinyVerify. The agent is never the source
-of a status. Runs are capped at 3/hour and 2 concurrent, with a **24-hour result cache**
-(`TINYVERIFY_AGENT_CACHE_TTL`, default 86400 seconds) and a quoted, data-only prompt.
+**Agent** — drives the California CSLB "Check A License" form and the California Department of
+Consumer Affairs search behind the Medical Board of California. Both name searches are session-based
+forms; when Search resolves no record URL, a TinyFish Agent run opens the official form, enters the
+name, submits, and returns up to 10 licence numbers against a JSON output schema. The agent supplies
+**licence numbers only** — the status, dates and disclosures are then read from the official detail
+page by TinyVerify. The agent is never the source of a status. Runs are capped at 3/hour and 2
+concurrent, with a **24-hour result cache** (`TINYVERIFY_AGENT_CACHE_TTL`, default 86400 seconds) and
+a quoted, data-only prompt.
 
 **Monitor** — every watch creates a TinyFish Monitor of type `fetch` on the official record URL,
 scheduled daily (`0 8 * * *` by default), with a webhook into `/api/webhooks/tinyfish`.
@@ -150,8 +162,8 @@ bot challenge or parse miss keeps the previous snapshot and emits no event. The 
 | Endpoint | Where it does real work | Not padding because |
 |---|---|---|
 | Search | UK Companies House, California CSLB | resolves record URLs; domain-filtered, no status taken from results |
-| Fetch | UK Companies House, NPPES NPI | reads the page/API that supplies every returned field; NPI cannot be read reliably otherwise |
-| Agent | California CSLB name lookups | the name form cannot be driven over plain HTTP; agent result is numbers only |
+| Fetch | UK Companies House, NPPES NPI, Medical Board of California | reads the page/API that supplies every returned field; NPI cannot be read reliably otherwise |
+| Agent | California CSLB and Medical Board of California name lookups | the name forms cannot be driven over plain HTTP; agent result is numbers only |
 | Monitor | every watch | owns the daily schedule and the change webhook; checks survive without TinyVerify running |
 
 ---
@@ -183,6 +195,9 @@ Every record carries `source_url`, `checked_at`, `source_name`, `registry_id`, `
 `status_detail`, `status_bounty`, `licence_number`, `expiry_date`, `disciplinary_actions`,
 `disciplinary_records`, `match_quality`, `name_number_mismatch`.
 `assertRecord()` rejects a record without an `http(s)` source URL and a parseable timestamp.
+A record can only be `exact` when the source page carried both the subject's name and the licence
+number (`exists: true`); the invariant is enforced in `lib/schema.js`. A registry that misses its
+25-second budget is reported as `timeout` with `incomplete: true` — not checked, never `no_match`.
 A cached response keeps the **original** `source_url` and `checked_at`, sets `cached: true`, and
 says so in `notes`.
 
@@ -223,15 +238,17 @@ Full contract: [docs/openapi.yaml](docs/openapi.yaml). Record schema: [docs/reco
 ## Verification performed
 
 ```text
-npm test          →  102 tests, 89 pass, 0 fail, 13 skipped (live tests)
+npm test          →  130 tests, 117 pass, 0 fail, 13 skipped (live tests)
 npm run test:live →  13 pass, 0 fail
 ```
 
 - Unit tests cover name variants, the token gate that rejects partial overlaps, the eight-status
-  vocabulary, date parsing, all six registry parsers against pages captured from the live sites,
-  mismatch detection, total-count handling, the Florida cross-registry rule, snapshot diffing,
-  monitor lifecycle and per-watch access control, transient-miss handling, webhook signatures and
-  replay, HTTP routing, error shapes, body limits, rate limiting and security headers.
+  vocabulary, date parsing, all eight registry parsers against pages captured from the live sites,
+  the exact-match invariant, mismatch detection, total-count handling, the state-board cross-registry
+  rules, parallel execution with per-registry timeouts, the KV-backed cache, Companies House
+  former-name matching, snapshot diffing, monitor lifecycle and per-watch access control,
+  transient-miss handling, webhook signatures and replay, HTTP routing, error shapes, body limits,
+  rate limiting and security headers.
 - The live suite exercises UK exact / nonsense / mismatch / liquidation, NZ, AU ABN and checksum,
   NPI true count and exact number, CSLB revocation plus arbitration disclosure, the Florida
   NPI + MQA cross-check, and special-character handling.
@@ -247,10 +264,11 @@ npm run test:live →  13 pass, 0 fail
   Agent that picked the first result — shipping that would be guessing), Ireland CRO (no stable
   server-rendered record page), Washington DOH (Salesforce JavaScript). All are recorded in
   `docs/registry-research.md` rather than shipped broken.
-- **Texas Medical Board and Medical Board of California** were prototyped and then removed from
-  coverage. TMB profile URLs are session-bound, so a source link cannot be handed to a judge; the
-  DCA search behind MBC blocks plain HTTP and its detail hashes cannot be derived. Shipping either
-  would mean a link that does not prove the record, so neither is claimed.
+- **Texas Medical Board** is read from the Board's official licence extract on the Texas Open Data
+  Portal, because TMB profile URLs are session-bound and cannot be shared. The record carries the
+  dataset URL. **Medical Board of California** number lookups read the DCA profile directly and do
+  not use the Agent; a California name search needs the Agent, so an exhausted wallet or hourly
+  budget is an error row, not "no licensee".
 - **NPPES is an enrolment registry**: it records the state licence a provider declared but does not
   publish that licence's status. Records say so; Florida pairs it with the state board.
 - **CSLB name-only lookups** can take up to ~2.5 minutes when the Agent fallback runs. A licence

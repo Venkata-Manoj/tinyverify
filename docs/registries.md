@@ -1,6 +1,6 @@
 # Registries
 
-Six official sources are wired. Each adapter lives in `lib/registries/`, declares its coverage in `meta`, and returns the shared record shape from `lib/schema.js`.
+Eight official sources are wired. Each adapter lives in `lib/registries/`, declares its coverage in `meta`, and returns the shared record shape from `lib/schema.js`.
 
 | Registry | `registry_id` | Type | Jurisdiction | Transport |
 |---|---|---|---|---|
@@ -10,10 +10,12 @@ Six official sources are wired. Each adapter lives in `lib/registries/`, declare
 | California CSLB | `cslb-ca` | `contractor` | `US-CA` | TinyFish Search + direct HTTPS, Agent fallback |
 | US NPPES NPI Registry | `npi-us` | `health` | `US` | TinyFish Fetch (JSON API) |
 | Florida Department of Health (MQA) | `mqa-fl` | `health` | `US-FL` | Direct HTTPS (ASP.NET form + detail page) |
+| Medical Board of California (DCA) | `mbc-ca` | `health` | `US-CA` | TinyFish Fetch (DCA profile) + Agent name search |
+| Texas Medical Board | `tmb-tx` | `health` | `US-TX` | Direct HTTPS (TMB licence extract, Texas Open Data Portal) |
 
 `GET /api/registries` returns this metadata plus the supported combinations; `GET /api/coverage` returns the matrix alone.
 
-`health / US-FL` resolves to **two** adapters (`npi-us` + `mqa-fl`): the federal NPI registry is paired with the Florida medical board, and the state board record is preferred because it carries expiry and discipline. `health / US` without a state, and other US states, stay federal-only.
+`health / US-FL` resolves to **two** adapters (`npi-us` + `mqa-fl`), and `health / US-CA` and `health / US-TX` do the same with `mbc-ca` and `tmb-tx`. The federal NPI registry is paired with the state medical board, and the state board record is preferred because it carries expiry and discipline. `health / US` without a state, and other US states, stay federal-only.
 
 US state health queries also send the state code downstream: whenever the jurisdiction is `US` or a `US-XX` state, the NPI lookup is filtered by that state (`state=<code>`), so a Florida query never returns an NPPES hit from another state.
 
@@ -233,6 +235,68 @@ When CSLB flags complaint disclosure, the adapter also reads `ComplaintDisclosur
 
 ---
 
+## Medical Board of California (DCA)
+
+**Official site:** https://search.dca.ca.gov (board `BD=800`, licence type `TP=8002`)
+
+**Why this source:** the Medical Board of California's own licensee lookup is the Department of Consumer Affairs licence search; the DCA profile page is the record the Board links to, and it carries status, dates and disciplinary actions.
+
+**Flow**
+
+1. With a licence number (`A93764`, `A 93764`): read `https://search.dca.ca.gov/profile/800/8002/<digits>/<prefix>` with TinyFish Fetch (`format: markdown`, `include_selectors: ["body"]`).
+2. If DCA redirects to `https://search.dca.ca.gov/`, the number does not exist. That is a clean `no_match`.
+3. If the page has no licence header or no licensee name, it is unreadable: the lookup is an **error**, never a `no_match`.
+4. DCA **ignores the prefix in the URL path** (`/100/A` returns `G 100`). The adapter compares the parsed licence number with the requested one and refuses the match if they differ.
+5. Without a number: a **TinyFish Agent** run performs the real name search on the DCA form and returns name/number pairs only. TinyVerify then fetches each profile and reads status, dates and discipline itself. The Agent never supplies a status. The Agent result is cached for 24 hours per name.
+
+**Record URL:** `https://search.dca.ca.gov/profile/800/8002/<digits>/<prefix>`.
+
+**Parsed fields**
+
+- `status` from `Primary Status` (`License Renewed & Current` → `active`, `Delinquent` → `expired`, `Licensee Deceased` → `inactive`)
+- `licence_number`, licensee `matched_name`, `licence_type`
+- `issue_date`, `expiry_date`
+- `has_discipline`, `discipline` from the Administrative Disciplinary Actions block
+
+**Caveats**
+
+- The exact-match invariant is enforced centrally: a record is only `exact` when the page carried both the licensee name and the licence number. `A999999` cannot become a match.
+- If the Agent wallet is unfunded or the Agent budget is exhausted, a name search returns an error row; it does not degrade to "no licensee".
+- Number lookups do not use the Agent and keep working when the Agent is unavailable.
+
+---
+
+## Texas Medical Board
+
+**Official site:** https://data.texas.gov/d/tm3v-pfq9 (TMB licence extract)
+
+**Why this source:** the TMB public profile URL (`PublicProfile.aspx?...`) only exists inside the browser session that created it; the same URL opened later returns the usage-terms page. The Board publishes the same licence fields as an official extract on the Texas Open Data Portal, refreshed daily, and that extract has a stable, shareable URL per query.
+
+**Flow**
+
+1. With a licence number (`L5138`, `BP20100682`): GET `https://data.texas.gov/resource/tm3v-pfq9.json?license_number=<number>`.
+2. Without a number: query `last_name` plus `$where=upper(first_name) like '<first>%'` (TMB stores middle names in `first_name`), optional `practice_state`.
+3. Parse rows into the shared licence shape; score names; return one match, several candidates, or no match.
+4. A non-2xx response or a non-array payload is an error, not a `no_match`.
+
+**Record URL:** `https://data.texas.gov/resource/tm3v-pfq9.json?license_number=<number>`.
+
+**Parsed fields**
+
+- `status` from `registration_status` (`ACTIVE` → `active`; `Terminated`, `Retired`, `Deceased` → `inactive`)
+- `licence_number`, name (`first_name` + `last_name` + `suffix`), `degree`
+- `issue_date`, `expiry_date`
+- `disciplinary_status`, `licence_type`, practice city/state
+- `currently_licensed`
+
+**Caveats**
+
+- The dataset is the Board's own published extract, not a scraped page; the record carries a note saying so.
+- `Zqxjv Flarnbot` returns `[]` and is a clean `no_match`, not an error.
+- The TMB website profile is not used as a source link because it cannot be shared.
+
+---
+
 ## Rejected sources
 
 These were investigated and deliberately not shipped, because a broken or guessed check is worse than an honest gap.
@@ -245,7 +309,7 @@ These were investigated and deliberately not shipped, because a broken or guesse
 | **Ireland CRO** | The public search is a session-based form; no stable server-rendered record page was found for a direct read. | Not wired. |
 | **Washington DOH** | Provider credential search is a Salesforce JavaScript application; the HTML does not contain the record. | Not wired. |
 | **Florida DBPR** | Separate from the Department of Health MQA; the public search did not yield a stable direct record URL in the time available. | Not wired. |
-| **Texas Medical Board** | The search form is stateful and every profile URL (`PublicProfile.aspx?<window-token>`) is bound to the session that created it. Without that session the same URL returns the usage-terms page, so there is no stable link a judge could open to prove the record. | Not wired. A result without a shareable source link would violate the trust contract. |
-| **Medical Board of California** | The MBC links to `search.dca.ca.gov`, which returns HTTP 403 to plain HTTP and tells automated clients to use `iservices.dca.ca.gov`; the detail page needs a per-record hash that cannot be derived from a licence number. The Agent path was blocked by an unfunded TinyFish wallet before it could be verified end to end. | Not wired until an Agent run can be verified and its detail link opened without a session. |
+
+The Texas Medical Board and the Medical Board of California were previously rejected for a missing shareable record link. Both are now wired through sources that do have one: the TMB licence extract on the Texas Open Data Portal (`tm3v-pfq9`) and the DCA licensee profile behind the Medical Board of California (`search.dca.ca.gov`). The session-bound TMB website profile and the DCA search form are still never used as the cited source.
 
 The registry metadata is intentionally a closed list: `/api/verify` returns `unsupported` for anything not in the matrix instead of pretending to check it.

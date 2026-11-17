@@ -41,6 +41,8 @@ TinyVerify checks a person, business or contractor against live official registr
 | `npi-us` | health | US | TinyFish Fetch (JSON API) |
 | `abn-au` | business | AU | Direct HTTPS (ABN Lookup) |
 | `mqa-fl` | health | US-FL | Direct HTTPS (ASP.NET form + detail page) |
+| `mbc-ca` | health | US-CA | TinyFish Fetch (DCA profile) + Agent name search |
+| `tmb-tx` | health | US-TX | Direct HTTPS (TMB licence extract, data.texas.gov) |
 
 ## Commands
 
@@ -63,3 +65,6 @@ Deployment: Vercel, no build step. `scripts/dev-server.js` serves `public/` and 
 - `TINYVERIFY_PUBLIC_URL` is the canonical HTTPS origin for TinyFish Monitor webhooks. Never derive it from the request Host header; on Vercel the code falls back to `VERCEL_PROJECT_PRODUCTION_URL`.
 - The webhook is public; set `TINYVERIFY_WEBHOOK_SECRET` to require a token or HMAC signature.
 - Watches are scoped by the browser's `X-TinyVerify-Owner` token. The server stores only the SHA-256 hash.
+- Registries run in parallel with a per-registry budget (`TINYVERIFY_REGISTRY_BUDGET_SECONDS`, default 25). A budget miss is `outcome: "timeout"` plus `incomplete: true` — never `no_match`.
+- `exact` requires `exists: true`, a matched name and a licence number from the source; the invariant lives in `lib/schema.js`, not in adapters.
+- Verification results and Agent lookups are cached in KV when `KV_REST_API_URL`/`KV_REST_API_TOKEN` are set, so a `cached: true` hit survives across function instances.

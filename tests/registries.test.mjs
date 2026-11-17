@@ -155,7 +155,7 @@ test('registry resolution accepts aliases and rejects unsupported pairs', () => 
   assert.deepEqual(resolveRegistries('business', 'Australia').map((r) => r.meta.id), ['abn-au']);
   assert.deepEqual(resolveRegistries('health', 'US-FL').map((r) => r.meta.id), ['npi-us', 'mqa-fl']);
   assert.deepEqual(resolveRegistries('health', 'US-CA').map((r) => r.meta.id), ['npi-us', 'mbc-ca']);
-  assert.deepEqual(resolveRegistries('health', 'US-TX').map((r) => r.meta.id), ['npi-us']);
+  assert.deepEqual(resolveRegistries('health', 'US-TX').map((r) => r.meta.id), ['npi-us', 'tmb-tx']);
   assert.deepEqual(resolveRegistries('health', 'USA', { state: 'CA' }).map((r) => r.meta.id), ['npi-us', 'mbc-ca']);
   assert.deepEqual(resolveRegistries('health', 'USA', { state: 'FL' }).map((r) => r.meta.id), ['npi-us', 'mqa-fl']);
   assert.deepEqual(resolveRegistries('health', 'USA').map((r) => r.meta.id), ['npi-us']);
@@ -167,10 +167,10 @@ test('registry resolution accepts aliases and rejects unsupported pairs', () => 
 test('coverage matrix only lists combinations we can actually serve', () => {
   const matrix = coverageMatrix();
   assert.deepEqual(matrix.types.sort(), ['business', 'contractor', 'health']);
-  assert.deepEqual(matrix.jurisdictions.sort(), ['AU', 'NZ', 'UK', 'US', 'US-CA', 'US-FL']);
+  assert.deepEqual(matrix.jurisdictions.sort(), ['AU', 'NZ', 'UK', 'US', 'US-CA', 'US-FL', 'US-TX']);
   assert.deepEqual(
     matrix.combinations.map((c) => `${c.licence_type}/${c.jurisdiction}`).sort(),
-    ['business/AU', 'business/NZ', 'business/UK', 'contractor/US-CA', 'health/US', 'health/US-CA', 'health/US-FL'],
+    ['business/AU', 'business/NZ', 'business/UK', 'contractor/US-CA', 'health/US', 'health/US-CA', 'health/US-FL', 'health/US-TX'],
   );
   for (const combo of matrix.combinations) assert.ok(combo.registries.length > 0);
 });

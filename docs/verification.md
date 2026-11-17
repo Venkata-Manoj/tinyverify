@@ -78,6 +78,8 @@ A registration number is an identity, not a fuzzy name search:
 - If a number is supplied **without** a subject, the record is `exact` by number.
 - If a name **and** number are supplied, the official name is compared with the supplied name. Below the 0.80 threshold the record becomes `mismatch`, `name_number_mismatch` is `true`, and a note says the number matched but the name did not. The record is still returned — hiding it would make the mismatch invisible — but the caller is told not to treat the pair as verified.
 
+`exact` has one hard invariant, enforced in `lib/schema.js` and not per adapter: an exact record must carry `exists: true`, a non-null `matched_name` **and** a non-null `licence_number` that came from the source page. `makeRecord()` demotes any record that fails this to `close`, and `assertRecord()` throws if such a record is constructed by hand. A number that the registry never confirmed can therefore never surface as `exact`.
+
 Two registries resolving the same subject are returned as **separate records** with a note. If their statuses disagree, `reconcileStatuses()` sets `conflict: true` and the response status becomes `unknown`; neither record is modified. The UI shows both and explains the disagreement. The Florida check is the deliberate cross-registry case: NPPES and MQA are both queried, and the state board record is preferred as `primary` because it carries expiry and discipline.
 
 ## 4. Status mapping
@@ -110,13 +112,28 @@ Order matters: "Active — proposal to strike off" is `active` because active wo
 
 A registry string that matches no rule is `unknown`, never a guess.
 
-## 5. Cache and refresh
+## 5. Cache, refresh and timeouts
 
 - TTL: 10 minutes (`TINYVERIFY_CACHE_TTL`).
 - Cache key: subject + type + jurisdiction + number + state + city + taxonomy.
 - A cached response is marked `cached: true`, keeps the **original** `source_url` and `checked_at`, reports `cache_age_seconds`, and adds a note saying it was served from cache.
+- Entries live in Vercel KV / Upstash Redis when `KV_REST_API_URL` and `KV_REST_API_TOKEN` are set, so every function instance sees the same cache; the process-local map is only a first-level read and a fallback.
 - `refresh: true` bypasses and replaces the cache entry. Because it costs an upstream read, the API honours it only for a caller presenting a valid admin key; every other caller gets the normal cached response.
 - Monitor checks always refresh.
+
+Registries run **in parallel**, each with a hard budget of 25 seconds
+(`TINYVERIFY_REGISTRY_BUDGET_SECONDS`, default `25`). The budget applies per registry, so one slow
+source cannot consume the whole request:
+
+- A registry that misses its budget is reported with `outcome: "timeout"` in `searched`, and the
+  response sets `incomplete: true`.
+- `timeout` means **not checked**. It is never rendered or returned as `no_match`, because claiming
+  the subject is absent from a source nobody read would be a fabricated result.
+- Registries that finished are still returned with their normal records.
+- The UI prints "not checked (timed out), retry" and offers a retry that re-runs the same query; the
+  incomplete banner says the result is incomplete.
+- A registry that throws is an `error` row, not a `no_match`. A registry that answers with no record
+  is the only thing that produces `no_match`.
 
 ## 6. Watches and change events
 
@@ -148,7 +165,7 @@ The demo simulator (`POST /api/monitors/:id/simulate`) is available only when `T
 
 ## 8. Manual live matrix
 
-Run against the live sources on **2026-11-05**; the automated live suite repeats these checks.
+Run against the live sources on **2026-11-17**; the automated live suite repeats these checks.
 
 | Input | Type / jurisdiction | Observed |
 |---|---|---|
@@ -163,6 +180,10 @@ Run against the live sources on **2026-11-05**; the automated live suite repeats
 | `Planise Jean Louis` + `1295346773` | health / US | `exact`, `active`, NPI matched |
 | `DONE RIGHT DISCOUNT FLOORING` + `738180` | contractor / US-CA | `exact`, `revoked`, expiry `2017-05-28`, arbitration `A S 2016 000293` |
 | `JOHN HORATIO SMITH II` + `ME182088` | health / US-FL | `exact`, `active`, expiry `2028-01-31`, NPI `no_match`, MQA `match` |
+| `Dennis Yun` + `A93764` | health / US-CA | `exact`, `active`, expiry `2028-01-31`, MBC `match` |
+| `A999999` | health / US-CA | `no_match` or `error`, never `exact` / `match` |
+| `John Flint Smith` + `L5138` | health / US-TX | `exact`, `active`, expiry `2028-05-31`, degree `MD`, TMB `match` |
+| `Zqxjv Flarnbot` | health / US-TX | `no_match`, not `error` |
 | `!!! ***` | business / UK | `no_match`, `searched: []`, no registry call |
 | `Test Doctor` | health / JP | `unsupported`, supported health jurisdictions listed |
 
