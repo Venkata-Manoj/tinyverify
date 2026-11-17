@@ -731,7 +731,22 @@
       if (s.source_url) regCell.appendChild(sourceAnchor(s.source_url, 'Open source', 'card-link'));
       row.appendChild(regCell);
       const outcome = s.outcome || 'unknown';
-      row.appendChild(el('td', `outcome outcome-${outcome}`, outcome));
+      if (outcome === 'timeout') {
+        /* A timed-out registry was not checked — never render it as a miss. */
+        const timeoutCell = el('td', 'outcome outcome-timeout');
+        timeoutCell.appendChild(document.createTextNode('not checked (timed out), '));
+        const retry = el('button', 'link-copy', 'retry', {
+          type: 'button',
+          'aria-label': 'Retry verification'
+        });
+        retry.addEventListener('click', () => {
+          if (state.currentQuery) runVerify(state.currentQuery);
+        });
+        timeoutCell.appendChild(retry);
+        row.appendChild(timeoutCell);
+      } else {
+        row.appendChild(el('td', `outcome outcome-${outcome}`, outcome));
+      }
       row.appendChild(el('td', null, s.detail || '—'));
       tbody.appendChild(row);
     }
@@ -915,13 +930,17 @@
       default: renderer = () => renderPrimaryResult(payload);
     }
 
-    if (payload.incomplete && Array.isArray(payload.errors) && payload.errors.length) {
+    if (payload.incomplete) {
       const warn = el('div', 'monitor-inline-banner p-change');
       warn.appendChild(el('h4', null, 'Incomplete result'));
-      warn.appendChild(el('p', null,
-        `These registries could not be read: ${payload.errors
+      let note = 'Some registries were not checked (timed out), so this result is incomplete. '
+        + 'Records held by those registries would not appear here.';
+      if (Array.isArray(payload.errors) && payload.errors.length) {
+        note += ` These registries could not be read: ${payload.errors
           .map((e) => `${e.registry_name || e.registry_id || 'registry'} — ${e.message}`)
-          .join(' · ')}`));
+          .join(' · ')}`;
+      }
+      warn.appendChild(el('p', null, note));
       resultBodyEl.appendChild(warn);
     }
 

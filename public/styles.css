@@ -342,6 +342,8 @@ details.rawjson summary { font-size: 13px; color: var(--slate); min-height: var(
 .outcome-multiple { color: var(--brass-deep); }
 .outcome-error { color: var(--red-deep); }
 .outcome-discovered { color: var(--emerald-deep); }
+/* timeout: the registry was not checked — warn tone, never a miss colour */
+.outcome-timeout { color: var(--brass-deep); }
 .no-match-lede { max-width: 560px; color: var(--muted); margin-top: 10px; }
 .notes-list { margin: 6px 0 0; padding-left: 18px; color: var(--ink); font-size: 14px; }
 .notes-list li { margin-bottom: 4px; }
