@@ -1,4 +1,44 @@
-# Production verification — 5 Nov 2026
+# Production verification
+
+## 17 Nov 2026 — eight registries and the five fixes
+
+Deployment: `https://tinyverify.vercel.app` (runtime commit `51bea86`, Vercel deployment `tinyverify-bcu2495vo`). Remote `main` was confirmed at `51bea86` with `git ls-remote` before this record was written.
+
+```bash
+curl -sS https://tinyverify.vercel.app/api/health
+```
+
+```json
+{"ok":true,"name":"TinyVerify","version":"0.3.0","api_key_configured":true,"demo":true,"storage":"kv","registries":["companies-house-uk","cslb-ca","npi-us","nz-companies","abn-au","mqa-fl","mbc-ca","tmb-tx"]}
+```
+
+`/api/coverage` reports eight combinations, including `health/US-CA: [npi-us, mbc-ca]` and `health/US-TX: [npi-us, tmb-tx]`.
+
+| Check | HTTP | Result |
+|---|---|---|
+| MBC made-up number `A999999` (name "Made Up Person") | 200 | `no_match`, 0 results, `mbc-ca` detail "no licensee record for A 999999"; never `exact` / `match` |
+| MBC real `A93764` (Dennis Yun) | 200 | `exact`, `active`, `A 93764`, `YUN, DENNIS`, expiry `2028-01-31`, source `search.dca.ca.gov/profile/800/8002/93764/A` |
+| NPI `John Smith`, health US-CA | 200 | `multiple`, 7 NPI candidates, 2.57 s; `mbc-ca` error row because the TinyFish wallet is `$0.00` (Agent name search only) |
+| CSLB "Pacific Coast Roofing" first / repeat | 200 | first 2.76 s; repeat 0.38 s, `cached: true`, `cache_age_seconds: 3` |
+| `Wilko Limited`, business UK | 200 | `multiple`: `09563205` WILKO LIMITED current, `00365335` WL REALISATIONS (2023) LIMITED `matched_via: previous_name`, `previous_name: WILKO LIMITED` |
+| `Royal Mail plc`, business UK | 200 | `multiple`; `08680755` INTERNATIONAL DISTRIBUTION SERVICES LIMITED is present with `matched_via: previous_name`, `previous_name: ROYAL MAIL PLC` |
+| `Marks and Spencer Group`, business UK | 200 | `multiple`, top two `04256886` (MARKS AND SPENCER GROUP P.L.C.) and `00214436` (MARKS AND SPENCER P.L.C.) |
+| `Tesco PLC` + `03977902`, business UK | 200 | `mismatch`, `name_number_mismatch: true`, official name `GOOGLE UK LIMITED` |
+| `Zqxjv Flarnbot Widgets Ltd`, business UK | 200 | `no_match`, 0 candidates |
+| `Zqxjv Flarnbot`, health US-TX | 200 | `no_match`, `tmb-tx` detail "no record"; not an error |
+| `JOHN HORATIO SMITH II` + `ME182088`, health US-FL | 200 | `exact`, `active`, expiry `2028-01-31`, `mqa-fl` result, `npi-us` skipped as a state licence |
+| `Maria Garcia`, health US-FL | 200 | `multiple`; every NPI candidate is FL-filtered, every MQA candidate is US-FL |
+| `Atul Gawande`, health US | 200 | `exact`, NPI `1578671483`, fields `credential: "MD"`, taxonomy `Surgery` |
+| `Dick Smith Holdings`, business AU | 200 | `multiple`; cancelled ABN `31 166 237 841` (DICK SMITH HOLDINGS LIMITED) is shown with `status: cancelled` |
+| Unsigned `POST /api/webhooks/tinyfish` | 401 | `BAD_SIGNATURE` |
+| `POST /api/monitors` without an owner token | 401 | `OWNER_REQUIRED` |
+| Rapid `POST /api/verify` loop | 200 then 429 | first 19 succeed, request 20 returns `429 RATE_LIMITED` |
+
+Not triggered live: the 25 s per-registry timeout and the UI retry row. Both are covered by `tests/timeout-cache.test.mjs`; the live checks above never produced a timeout, so the production timeout path is **NOT VERIFIED** here.
+
+The TinyFish wallet is empty (`$0.00`), so the MBC Agent name search returns an error row and the response is `incomplete: true` for US-CA name queries. MBC licence-number lookups do not use the Agent and are unaffected.
+
+## 5 Nov 2026
 
 Deployment: `https://tinyverify.vercel.app` (code commit `ab86a70`, docs commit `7868308`). Functional checks ran against the `ab86a70` build; the later commit changes only the README and this evidence file, not runtime code.
 
