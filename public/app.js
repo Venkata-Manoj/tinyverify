@@ -933,8 +933,13 @@
     if (payload.incomplete) {
       const warn = el('div', 'monitor-inline-banner p-change');
       warn.appendChild(el('h4', null, 'Incomplete result'));
-      let note = 'Some registries were not checked (timed out), so this result is incomplete. '
-        + 'Records held by those registries would not appear here.';
+      /* A timeout is not checked; an error could not be read. Say which one happened. */
+      const timedOut = (payload.searched || []).some((row) => row.outcome === 'timeout');
+      let note = timedOut
+        ? 'Some registries were not checked (timed out), so this result is incomplete. '
+          + 'Records held by those registries would not appear here.'
+        : 'One or more registries could not be read, so this result is incomplete. '
+          + 'Records held by those registries would not appear here.';
       if (Array.isArray(payload.errors) && payload.errors.length) {
         note += ` These registries could not be read: ${payload.errors
           .map((e) => `${e.registry_name || e.registry_id || 'registry'} — ${e.message}`)
